@@ -1,31 +1,29 @@
 <?php
 // events.php
 
-// 5. Connect to the MySQL database
+// This page does NOT require login. It is accessible to all users.
+session_start(); // Start session to check login status for navbar links
+
+// 1. Connect to the MySQL database
 require_once 'includes/config.php';
 
 $events = []; // Initialize an empty array to store fetched events
 $message = ""; // To display any messages (e.g., no events found)
 
-// 2. Fetch events from the 'events' table where status = 'approved'
-// Join with 'organizers' table to get the organizer’s name
+// 2. Fetch all events where status = 'approved'
+// Assumed columns: id, title, event_date, event_time, location, status
 $sql = "SELECT 
-            e.id, 
-            e.title, 
-            e.description, 
-            e.event_date, 
-            e.event_time, 
-            e.location, 
-            e.category, 
-            o.name AS organizer_name 
+            id, 
+            title, 
+            event_date, 
+            event_time, 
+            location 
         FROM 
-            events e
-        JOIN 
-            organizers o ON e.organizer_id = o.id
+            events 
         WHERE 
-            e.status = 'approved'
+            status = 'approved'
         ORDER BY 
-            e.event_date ASC, e.event_time ASC"; 
+            event_date ASC, event_time ASC"; // Order by date and time to show upcoming events first
 
 if ($result = $conn->query($sql)) {
     if ($result->num_rows > 0) {
@@ -33,6 +31,7 @@ if ($result = $conn->query($sql)) {
             $events[] = $row;
         }
     } else {
+        // 6. Handle the case where no events are available
         $message = "<div class='info-msg'>No approved events found at the moment. Please check back later!</div>";
     }
     $result->free(); // Free result set
@@ -48,12 +47,11 @@ $conn->close(); // Close the database connection
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- 6. Title of the page -->
     <title>Browse Events - Mero Events</title>
-    <!-- 4. Link to external stylesheet -->
+    <!-- 5. Use external stylesheet -->
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
-        /* Specific styling for the events page */
+        /* Specific styling for the events page (card layout) */
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f7f6;
@@ -86,11 +84,11 @@ $conn->close(); // Close the database connection
             margin: 0 auto;
         }
 
-        /* 4. Use flexbox to show events responsively */
+        /* 5. Use flexbox or grid to show events responsively (Flexbox for cards) */
         .events-grid {
             display: flex;
             flex-wrap: wrap; /* Allow cards to wrap to the next line */
-            gap: 30px;
+            gap: 30px; /* Space between cards */
             justify-content: center; /* Center cards horizontally */
             align-items: stretch; /* Make cards stretch to equal height */
         }
@@ -101,11 +99,11 @@ $conn->close(); // Close the database connection
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
             padding: 25px;
             flex: 1 1 calc(33% - 40px); /* Approx 3 cards per row, accounting for gap */
-            min-width: 280px; 
+            min-width: 280px; /* Minimum width for responsiveness */
             max-width: 380px; /* Max width to prevent cards from becoming too wide */
             display: flex;
             flex-direction: column;
-            justify-content: space-between; /* Push footer info to bottom */
+            justify-content: space-between; /* Push 'View Details' button to bottom */
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
@@ -121,39 +119,38 @@ $conn->close(); // Close the database connection
             line-height: 1.3;
         }
 
-        .event-card p {
+        .event-info {
             font-size: 1em;
             color: #666;
-            margin-bottom: 10px;
-            line-height: 1.6;
+            margin-bottom: 20px;
         }
         
-        .event-card p strong {
+        .event-info p {
+            margin: 0 0 8px 0; /* Adjust margin for paragraphs within info block */
+        }
+
+        .event-info strong {
             color: #333;
         }
 
-        .event-card .description {
-            font-size: 0.95em;
-            color: #444;
-            margin-bottom: 20px;
-        }
-
-        .event-meta {
-            font-size: 0.9em;
-            color: #888;
-            border-top: 1px solid #eee;
-            padding-top: 15px;
-            margin-top: 15px;
-        }
-        .event-meta p {
-            margin-bottom: 5px;
-        }
-        .event-meta .organizer-name {
+        .event-card .details-button {
+            display: inline-block;
+            background-color: #28a745;
+            color: #fff;
+            padding: 10px 15px;
+            border-radius: 5px;
+            text-decoration: none;
             font-weight: bold;
-            color: #555;
+            margin-top: 15px; /* Space above the button */
+            align-self: flex-start; /* Align button to the left within the card */
+            transition: background-color 0.3s ease;
         }
 
-       
+        .event-card .details-button:hover {
+            background-color: #218838;
+        }
+
+        /* Responsive adjustments for events grid */
         @media (max-width: 992px) {
             .event-card {
                 flex: 1 1 calc(50% - 40px); /* 2 cards per row on medium screens */
@@ -275,17 +272,6 @@ $conn->close(); // Close the database connection
             border-color: #0056b3;
         }
 
-        .btn-secondary {
-            background-color: #28a745;
-            color: #fff;
-            border: 1px solid #28a745;
-        }
-
-        .btn-secondary:hover {
-            background-color: #218838;
-            border-color: #1e7e34;
-        }
-
         .main-footer {
             background-color: #333;
             color: #fff;
@@ -314,9 +300,8 @@ $conn->close(); // Close the database connection
                     <li><a href="contact.php">Contact</a></li>
                     
                     <?php
-                    // Dynamic Login/Dashboard/Logout links (reused from index.php logic)
+                    // Dynamic Login/Dashboard/Logout links (reused logic from index.php)
                     // This section is public, so check session status
-                    session_start(); // Ensure session is started for this check
                     if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true) {
                         $dashboard_link = '#'; // Default fallback
                         
@@ -343,8 +328,8 @@ $conn->close(); // Close the database connection
     <main>
         <div class="container">
             <div class="events-header">
-                <h1>Upcoming Events in Bharatpur</h1>
-                <p>Explore a variety of educational, community, and student-focused events happening in your local region. Find programs that match your interests and empower your participation!</p>
+                <h1>Browse All Approved Events</h1>
+                <p>Discover a variety of engaging educational programs, community gatherings, and student initiatives happening in Bharatpur, Nepal. Your next experience is just a click away!</p>
             </div>
 
             <?php 
@@ -360,24 +345,14 @@ $conn->close(); // Close the database connection
                         <div class="event-card">
                             <div>
                                 <h3><?php echo htmlspecialchars($event['title']); ?></h3>
-                                <p class="description">
-                                    <?php 
-                                        // Display a brief description (e.g., first 150 characters)
-                                        $short_description = htmlspecialchars($event['description']);
-                                        if (strlen($short_description) > 150) {
-                                            $short_description = substr($short_description, 0, 150) . '...';
-                                        }
-                                        echo $short_description;
-                                    ?>
-                                </p>
+                                <div class="event-info">
+                                    <p><strong>Date:</strong> <?php echo htmlspecialchars(date('M d, Y', strtotime($event['event_date']))); ?></p>
+                                    <p><strong>Time:</strong> <?php echo htmlspecialchars(date('h:i A', strtotime($event['event_time']))); ?></p>
+                                    <p><strong>Location:</strong> <?php echo htmlspecialchars($event['location']); ?></p>
+                                </div>
                             </div>
-                            <div class="event-meta">
-                                <p><strong>Date:</strong> <?php echo htmlspecialchars(date('M d, Y', strtotime($event['event_date']))); ?></p>
-                                <p><strong>Time:</strong> <?php echo htmlspecialchars(date('h:i A', strtotime($event['event_time']))); ?></p>
-                                <p><strong>Location:</strong> <?php echo htmlspecialchars($event['location']); ?></p>
-                                <p><strong>Category:</strong> <?php echo htmlspecialchars($event['category']); ?></p>
-                                <p><strong>Organizer:</strong> <span class="organizer-name"><?php echo htmlspecialchars($event['organizer_name']); ?></span></p>
-                            </div>
+                            <!-- 4. Each "View Details" button should link to event-details.php?id=EVENT_ID -->
+                            <a href="event-details.php?id=<?php echo htmlspecialchars($event['id']); ?>" class="details-button">View Details</a>
                         </div>
                     <?php endforeach; ?>
                 </div>
