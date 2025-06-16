@@ -25,7 +25,7 @@ $sql = "SELECT
         WHERE 
             e.status = 'approved'
         ORDER BY 
-            e.event_date ASC, e.event_time ASC"; // Order by date and time to show upcoming events first
+            e.event_date ASC, e.event_time ASC"; 
 
 if ($result = $conn->query($sql)) {
     if ($result->num_rows > 0) {
@@ -90,7 +90,7 @@ $conn->close(); // Close the database connection
         .events-grid {
             display: flex;
             flex-wrap: wrap; /* Allow cards to wrap to the next line */
-            gap: 30px; /* Space between cards */
+            gap: 30px;
             justify-content: center; /* Center cards horizontally */
             align-items: stretch; /* Make cards stretch to equal height */
         }
@@ -101,7 +101,7 @@ $conn->close(); // Close the database connection
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
             padding: 25px;
             flex: 1 1 calc(33% - 40px); /* Approx 3 cards per row, accounting for gap */
-            min-width: 280px; /* Minimum width for responsiveness */
+            min-width: 280px; 
             max-width: 380px; /* Max width to prevent cards from becoming too wide */
             display: flex;
             flex-direction: column;
@@ -153,7 +153,7 @@ $conn->close(); // Close the database connection
             color: #555;
         }
 
-        /* Responsive adjustments for events grid */
+       
         @media (max-width: 992px) {
             .event-card {
                 flex: 1 1 calc(50% - 40px); /* 2 cards per row on medium screens */

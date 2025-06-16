@@ -10,36 +10,34 @@ session_start(); // Start the session at the very beginning of the script
     <!-- Link to your main CSS file -->
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
-        /* Internal CSS for specific elements or overrides not in style.css */
-
-        /* Welcome message in the navbar */
+        
         .welcome-message {
-            color: #555; /* Matches default nav link color */
+            color: #555; 
             font-weight: 500;
-            margin-right: 15px; /* Adds space before the Dashboard/Logout buttons */
-            white-space: nowrap; /* Prevent username from wrapping */
+            margin-right: 15px; 
+            white-space: nowrap; 
         }
         
         /* Ensure consistent spacing in nav links */
         .nav-links li {
-            margin-left: 25px; /* Standard spacing between nav items */
+            margin-left: 25px; 
         }
         .nav-links li:first-child {
-            margin-left: 0; /* Remove left margin for the very first item in the list */
+            margin-left: 0; 
         }
 
-        /* Hero Section styles (if not already in style.css, otherwise style.css takes precedence) */
+        
         .hero-section {
-            background-color: #e9f0f9; /* Light blue background */
-            padding: 100px 0; /* More padding for a prominent hero */
+            background-color: #e9f0f9; 
+            padding: 100px 0; 
             text-align: center;
             color: #333;
         }
 
         .hero-content h1 {
-            font-size: 3.2em; /* Large, prominent heading */
+            font-size: 3.2em; 
             margin-bottom: 20px;
-            color: #2c3e50; /* Darker text for heading */
+            color: #2c3e50; 
             max-width: 800px;
             margin-left: auto;
             margin-right: auto;
@@ -47,14 +45,13 @@ session_start(); // Start the session at the very beginning of the script
 
         .hero-content p {
             font-size: 1.2em;
-            max-width: 800px; /* Limit paragraph width for readability */
-            margin: 0 auto 30px auto; /* Center paragraph with bottom margin */
+            max-width: 800px; 
+            margin: 0 auto 30px auto; 
             color: #555;
             line-height: 1.8;
         }
 
-        /* Call to Action Button (assuming .btn and .btn-secondary exist in style.css) */
-        /* If not, define them here or in style.css */
+        
         .btn {
             display: inline-block;
             padding: 12px 25px;
@@ -62,7 +59,7 @@ session_start(); // Start the session at the very beginning of the script
             font-weight: bold;
             text-align: center;
             transition: background-color 0.3s ease, transform 0.2s ease;
-            text-decoration: none; /* Ensure no underline */
+            text-decoration: none;
         }
 
         .btn-primary {
@@ -74,11 +71,11 @@ session_start(); // Start the session at the very beginning of the script
         .btn-primary:hover {
             background-color: #0056b3;
             border-color: #0056b3;
-            transform: translateY(-2px); /* Slight lift on hover */
+            transform: translateY(-2px);
         }
 
         .btn-secondary {
-            background-color: #28a745; /* A pleasant green */
+            background-color: #28a745; 
             color: #fff;
             border: 1px solid #28a745;
         }
@@ -89,28 +86,28 @@ session_start(); // Start the session at the very beginning of the script
             transform: translateY(-2px);
         }
 
-        /* Footer (if not already styled by style.css) */
+       
         .main-footer {
             background-color: #333;
             color: #fff;
             text-align: center;
             padding: 25px 0;
             font-size: 0.9em;
-            margin-top: auto; /* Push footer to the bottom if content is short */
+            margin-top: auto; 
             width: 100%;
         }
         .main-footer p {
             margin: 0;
         }
         
-        /* Body flex for sticky footer */
+      
         body {
             display: flex;
             flex-direction: column;
             min-height: 100vh;
         }
         main {
-            flex-grow: 1; /* Allow main content to take available space */
+            flex-grow: 1; 
         }
     </style>
 </head>
@@ -163,7 +160,7 @@ session_start(); // Start the session at the very beginning of the script
             </div>
         </section>
         
-        <!-- You can add other sections here if needed, e.g., for featured events, how it works, etc. -->
+      
 
     </main>
 

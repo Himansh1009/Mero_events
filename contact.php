@@ -291,7 +291,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             <div class="contact-info">
                 <p><strong>Email:</strong> info@meroevents.com</p>
-                <p><strong>Phone:</strong> +977-98XXXXXXXX (Nepal)</p>
+                <p><strong>Phone:</strong> +977-9849011111 (Nepal)</p>
                 <p><strong>Address:</strong> Bharatpur, Chitwan, Nepal</p>
                 <p><strong>Office Hours:</strong> Sunday - Friday, 9:00 AM - 5:00 PM (NPT)</p>
             </div>
