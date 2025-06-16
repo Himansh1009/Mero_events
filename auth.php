@@ -179,15 +179,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     // Verify the password using password_verify()
                     if (password_verify($login_password, $hashed_password)) {
                         // Password is correct, create PHP session
-                        $_SESSION["logged_in"] = true;
-                        $_SESSION["user_id"] = $id;
-                        $_SESSION["user_name"] = $name;
-                        $_SESSION["user_email"] = $email_from_db; // Store email in session
-                        $_SESSION["user_type"] = $selected_user_type; // Store user type in session
-
-                        // Redirect user to respective dashboard page
-                        header("location: $redirect_dashboard");
-                        exit(); // Always exit after a header redirect
+                        if ($selected_user_type == 'organizer' && $is_approved == 0) {
+                            $message = "<div class='error-msg'>Your account is pending admin approval.</div>";
+                        } else {
+                            // Proceed with session setup and redirect
+                            $_SESSION["logged_in"] = true;
+                            $_SESSION["user_id"] = $id;
+                            $_SESSION["user_name"] = $name;
+                            $_SESSION["user_type"] = $selected_user_type;
+                        
+                            $redirect_dashboard = ($selected_user_type == 'organizer') ? 'organizer-dashboard/dashboard.php' : 'user-dashboard/dashboard.php';
+                            header("location: $redirect_dashboard");
+                            exit();
+                        } // Always exit after a header redirect
                     } else {
                         $message = "<div class='error-msg'>The password you entered was not valid.</div>";
                     }
