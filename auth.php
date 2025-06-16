@@ -165,7 +165,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $redirect_dashboard = ($selected_user_type == 'organizer') ? 'organizer-dashboard/dashboard.php' : 'user-dashboard/dashboard.php';
 
             // Prepare a select statement to fetch credentials
-            $sql_login = "SELECT id, name, email, password FROM $table WHERE email = ?"; // Added email to select for session
+            $sql_login = "SELECT id, name, password, is_approved FROM $table WHERE email = ?"; // Added email to select for session
             if ($stmt_login = $conn->prepare($sql_login)) {
                 $stmt_login->bind_param("s", $param_email);
                 $param_email = $login_email;
@@ -173,7 +173,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $stmt_login->store_result();
 
                 if ($stmt_login->num_rows == 1) {
-                    $stmt_login->bind_result($id, $name, $email_from_db, $hashed_password); // Bind email from DB
+                    $stmt_login->bind_result($id, $name, $hashed_password, $is_approved); // Bind email from DB
                     $stmt_login->fetch();
 
                     // Verify the password using password_verify()
