@@ -1,27 +1,60 @@
 <?php
 // admin-dashboard/manage-events.php
 
-// Protect the page: Only accessible to logged-in admins.
+// 1. Basic Setup: Enable full error reporting at the top
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+// 1. Basic Setup: Use includes/session-admin.php for session protection
 require_once '../includes/session-admin.php';
-// Connect to the database
+// 1. Basic Setup: Use includes/config.php for DB connection
 require_once '../includes/config.php';
 
-$message = ""; // To store success/error messages
+$message = ""; // To store success or error messages
 
-// Check for messages from approve.php or reject.php redirects
-if (isset($_GET['status_update'])) {
-    if ($_GET['status_update'] == 'success') {
-        $message = "<div class='success-msg'>Event status updated successfully!</div>";
-    } elseif ($_GET['status_update'] == 'error') {
-        $message = "<div class='error-msg'>Failed to update event status.</div>";
-    } elseif ($_GET['status_update'] == 'invalid') {
-        $message = "<div class='error-msg'>Invalid event ID or action.</div>";
+// --- 4. Approve/Reject Actions: Handle POST request ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && (isset($_POST['approve_event_id']) || isset($_POST['reject_event_id']))) {
+    $event_id = null;
+    $new_status = null;
+
+    if (isset($_POST['approve_event_id'])) {
+        $event_id = trim($_POST['approve_event_id']);
+        $new_status = 'approved';
+    } elseif (isset($_POST['reject_event_id'])) {
+        $event_id = trim($_POST['reject_event_id']);
+        $new_status = 'rejected';
+    }
+
+    // Validate event ID
+    if (!filter_var($event_id, FILTER_VALIDATE_INT)) {
+        $message = "<div class='error-msg'>Invalid event ID provided for action.</div>";
+    } else {
+        // Update `status` in `events` table to either `approved` or `rejected`
+        $sql = "UPDATE events SET status = ? WHERE id = ?";
+
+        if ($stmt = $conn->prepare($sql)) {
+            $stmt->bind_param("si", $new_status, $event_id);
+
+            if ($stmt->execute()) {
+                if ($stmt->affected_rows > 0) {
+                    // Display a success message
+                    $message = "<div class='success-msg'>Event (ID: " . htmlspecialchars($event_id) . ") has been " . htmlspecialchars($new_status) . ".</div>";
+                } else {
+                    $message = "<div class='info-msg'>No changes made or event not found.</div>";
+                }
+            } else {
+                // Display a success or error message
+                $message = "<div class='error-msg'>Error updating event status: " . $stmt->error . "</div>";
+            }
+            $stmt->close();
+        } else {
+            $message = "<div class='error-msg'>Database error: Could not prepare update statement.</div>";
+        }
     }
 }
 
-
-// Fetch all events from the events table
-// Join with organizers table to get the organizer’s name
+// --- 3. Fetch Data: Fetch all events from events table & Join with organizers table ---
 $events = [];
 $sql = "SELECT 
             e.id, 
@@ -38,7 +71,7 @@ $sql = "SELECT
         JOIN 
             organizers o ON e.organizer_id = o.id
         ORDER BY 
-            e.created_at DESC"; // Order by creation date, newest first
+        e.event_date DESC, e.event_time DESC"; // Order by creation date, newest first
 
 if ($result = $conn->query($sql)) {
     if ($result->num_rows > 0) {
@@ -46,7 +79,7 @@ if ($result = $conn->query($sql)) {
             $events[] = $row;
         }
     } else {
-        // Bonus: If there are no events, show a message
+        // 6. Edge Handling: Display "No events found" message if no events exist
         $message = "<div class='info-msg'>No events found in the database.</div>";
     }
     $result->free(); // Free result set
@@ -63,10 +96,10 @@ $conn->close(); // Close database connection after all operations
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manage Events - Mero Events (Admin)</title>
-    <!-- External CSS: ../assets/css/style.css -->
+    <!-- Link to your main CSS file for consistent styling -->
     <link rel="stylesheet" href="../assets/css/style.css">
     <style>
-        /* Admin dashboard specific styling */
+        /* 5. Styling: Use clean CSS for styling (reusing and adding specific classes) */
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f7f6;
@@ -101,7 +134,7 @@ $conn->close(); // Close database connection after all operations
             font-size: 2.5em;
         }
 
-        /* Table Styling */
+        /* 5. Styling: Clean table layout with buttons */
         .events-admin-table {
             width: 100%;
             border-collapse: collapse;
@@ -134,17 +167,18 @@ $conn->close(); // Close database connection after all operations
             white-space: nowrap; /* Keep buttons on one line */
             text-align: center;
         }
-        .events-admin-table .actions a {
+        .events-admin-table .actions form {
             display: inline-block;
+            margin: 0 3px; /* Small space between buttons */
+        }
+        .events-admin-table .actions button {
             padding: 8px 12px;
             font-size: 0.9em;
             border-radius: 5px;
             cursor: pointer;
             border: none;
             color: #fff;
-            text-decoration: none; /* Remove underline */
             transition: background-color 0.3s ease;
-            margin: 0 3px; /* Small space between buttons */
         }
         .btn-approve {
             background-color: #28a745; /* Green */
@@ -159,11 +193,12 @@ $conn->close(); // Close database connection after all operations
             background-color: #c82333;
         }
 
-        /* Status colors */
-        .status-pending { color: #f0ad4e; font-weight: bold; } /* Yellow */
+        /* Status (Pending, Approved, Rejected) - colored labels */
+        .status-pending { color: #f0ad4e; font-weight: bold; } /* Yellow/Orange */
         .status-approved { color: #5cb85c; font-weight: bold; } /* Green */
         .status-rejected { color: #d9534f; font-weight: bold; } /* Red */
         
+        /* Message styling (reused from other pages) */
         .message {
             margin-bottom: 20px;
             padding: 12px;
@@ -275,6 +310,7 @@ $conn->close(); // Close database connection after all operations
             <nav class="main-nav">
                 <a href="../index.php" class="site-logo">Mero Events (Admin)</a>
                 <ul class="nav-links">
+                    <!-- Link to admin dashboard -->
                     <li><a href="dashboard.php" class="btn btn-primary">Back to Dashboard</a></li> 
                     <li><a href="../admin-logout.php" class="btn btn-primary" style="background-color: #dc3545;">Logout</a></li>
                 </ul>
@@ -333,9 +369,15 @@ $conn->close(); // Close database connection after all operations
                                 </td>
                                 <td class="actions">
                                     <?php if ($event['status'] == 'pending'): ?>
-                                        <!-- Approve / Reject buttons -->
-                                        <a href="approve.php?id=<?php echo $event['id']; ?>" class="btn-approve">Approve</a>
-                                        <a href="reject.php?id=<?php echo $event['id']; ?>" class="btn-reject">Reject</a>
+                                        <!-- 4. For events with status `pending`, show: "Approve" button & "Reject" button -->
+                                        <form action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" method="post" style="display:inline-block;">
+                                            <input type="hidden" name="approve_event_id" value="<?php echo $event['id']; ?>">
+                                            <button type="submit" class="btn-approve">Approve</button>
+                                        </form>
+                                        <form action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" method="post" style="display:inline-block;">
+                                            <input type="hidden" name="reject_event_id" value="<?php echo $event['id']; ?>">
+                                            <button type="submit" class="btn-reject">Reject</button>
+                                        </form>
                                     <?php else: ?>
                                         <!-- If already approved/rejected, no action needed -->
                                         No actions
@@ -346,10 +388,14 @@ $conn->close(); // Close database connection after all operations
                     </tbody>
                 </table>
             <?php else: ?>
+                <!-- This message is set in the PHP logic if $events is empty -->
                 <?php 
-                // Message already handled in PHP block; just display it if there's no data
-                if (!empty($message)) {
+                // Only show this specific message if no events were found and no other error message is present
+                // (This handles the case where $message might already contain an error from DB query)
+                if (strpos($message, 'No events found') !== false) {
                     echo $message;
+                } elseif (empty($message)) { // Fallback if $message is completely empty for some reason
+                    echo "<div class='info-msg'>No events found at the moment.</div>";
                 }
                 ?>
             <?php endif; ?>

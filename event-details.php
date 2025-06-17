@@ -8,8 +8,8 @@ $event = null; // Variable to store event details
 $message = ""; // For displaying feedback messages to the user
 $event_id = null; // Initialize event ID for tracking
 
-// Assume user is logged in if session variables are set (as per prompt)
-$is_logged_in_user = (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true && $_SESSION['user_type'] === 'user');
+// Assume user is logged in if session variables are set and user_type is 'user'
+$is_logged_in_user = (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true && isset($_SESSION['user_type']) && $_SESSION['user_type'] === 'user');
 $user_id = $is_logged_in_user ? $_SESSION['user_id'] : null;
 
 // --- Handle Ticket Booking Form Submission ---
@@ -27,6 +27,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])
         $conn->begin_transaction();
 
         try {
+            // Check if user has already booked this event
+            $sql_check_duplicate = "SELECT id FROM ticket_bookings WHERE user_id = ? AND event_id = ? FOR UPDATE"; // Lock for current user
+            if ($stmt_duplicate = $conn->prepare($sql_check_duplicate)) {
+                $stmt_duplicate->bind_param("ii", $user_id, $booking_event_id);
+                $stmt_duplicate->execute();
+                $stmt_duplicate->store_result();
+                if ($stmt_duplicate->num_rows > 0) {
+                    throw new Exception("You have already booked this event.");
+                }
+                $stmt_duplicate->close();
+            } else {
+                throw new Exception("Database error preparing duplicate booking check.");
+            }
+
             // 1. Get current ticket availability
             $sql_check_tickets = "SELECT total_tickets, tickets_booked FROM events WHERE id = ? AND status = 'approved' FOR UPDATE"; // FOR UPDATE locks row
             if ($stmt_check = $conn->prepare($sql_check_tickets)) {
@@ -72,11 +86,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])
 
                 $conn->commit(); // Commit the transaction
                 $message = "<div class='success-msg'>Successfully booked " . htmlspecialchars($num_tickets) . " ticket(s)!</div>";
-                // To ensure updated tickets_remaining is displayed, we could refresh the page
-                // header("Location: event-details.php?id=" . $booking_event_id . "&booked=true");
-                // exit();
+                
+                // To ensure updated tickets_remaining is displayed, re-fetch event data.
+                // This will happen automatically via the GET logic below after POST is handled.
             } else {
-                throw new Exception("Database error checking tickets.");
+                throw new Exception("Database error checking tickets (availability check).");
             }
         } catch (Exception $e) {
             $conn->rollback(); // Rollback on error
@@ -101,8 +115,8 @@ if (isset($_GET['id']) && is_numeric($_GET['id'])) {
                 e.event_time, 
                 e.location, 
                 e.category,
-                e.total_tickets,    /* Added for calculations */
-                e.tickets_booked,   /* Added for calculations */
+                e.total_tickets,    
+                e.tickets_booked,   
                 o.name AS organizer_name 
             FROM 
                 events e
@@ -397,9 +411,14 @@ $conn->close(); // Close the database connection
                             <span><?php echo htmlspecialchars($event['category']); ?></span>
                         </div>
                         <div class="meta-item">
+                            <strong>Total Tickets</strong>
+                            <span><?php echo htmlspecialchars($event['total_tickets']); ?></span>
+                        </div>
+                        <div class="meta-item">
                             <strong>Tickets Remaining</strong>
                             <span>
                                 <?php 
+                                // Calculate: remaining_tickets = total_tickets - tickets_booked
                                 $tickets_remaining = $event['total_tickets'] - $event['tickets_booked'];
                                 echo htmlspecialchars($tickets_remaining);
                                 ?>
@@ -414,7 +433,7 @@ $conn->close(); // Close the database connection
 
                     <div class="booking-section">
                         <h3>Book Your Tickets</h3>
-                        <?php if ($tickets_remaining > 0): ?>
+                        <?php if ($tickets_remaining > 0): // Only show form if tickets are available ?>
                             <p class="tickets-remaining"><?php echo htmlspecialchars($tickets_remaining); ?> tickets remaining!</p>
                             
                             <?php if ($is_logged_in_user): ?>
@@ -422,15 +441,18 @@ $conn->close(); // Close the database connection
                                     <input type="hidden" name="event_id" value="<?php echo htmlspecialchars($event_id); ?>">
                                     <div class="form-group">
                                         <label for="num_tickets">Number of Tickets:</label>
+                                        <!-- Input field: "Number of Tickets" (allow user to select between 1 and remaining_tickets) -->
                                         <input type="number" id="num_tickets" name="num_tickets" min="1" max="<?php echo htmlspecialchars($tickets_remaining); ?>" value="1" required>
                                     </div>
+                                    <!-- Submit button: "Book Tickets" -->
                                     <button type="submit" name="book_tickets_submit">Book Now</button>
                                 </form>
                             <?php else: ?>
                                 <p class="login-to-book">Please <a href="auth.php?action=login">log in</a> as a user to book tickets.</p>
                             <?php endif; ?>
 
-                        <?php else: ?>
+                        <?php else: // tickets_remaining is 0 or less ?>
+                            <!-- Display "Sold Out" message and hide booking form -->
                             <p class="tickets-sold-out">❗ This event is sold out.</p>
                         <?php endif; ?>
                     </div>
