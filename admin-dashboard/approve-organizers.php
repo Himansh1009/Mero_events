@@ -1,14 +1,14 @@
 <?php
 // admin-dashboard/approve-organizers.php
 
-// Include session check with session-admin.php
+// 2. Use includes/session-admin.php for session protection
 require_once '../includes/session-admin.php';
-// Connect using includes/config.php
+// 1. Use includes/config.php for DB connection
 require_once '../includes/config.php';
 
 $message = ""; // For displaying success or error messages
 
-// --- Handle Approval Action ---
+// --- 6. On clicking approve: Use POST, Update `is_approved` to 1 ---
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['approve_organizer_id'])) {
     $organizer_id_to_approve = trim($_POST['approve_organizer_id']);
 
@@ -16,7 +16,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['approve_organizer_id']
     if (!filter_var($organizer_id_to_approve, FILTER_VALIDATE_INT)) {
         $message = "<div class='error-msg'>Invalid organizer ID provided.</div>";
     } else {
-        // Update that organizer’s is_approved to 1
+        // Update that organizer’s is_approved to 1 using prepared statements
         $sql = "UPDATE organizers SET is_approved = 1 WHERE id = ?";
 
         if ($stmt = $conn->prepare($sql)) {
@@ -24,6 +24,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['approve_organizer_id']
 
             if ($stmt->execute()) {
                 if ($stmt->affected_rows > 0) {
+                    // Show a success message
                     $message = "<div class='success-msg'>Organizer (ID: " . htmlspecialchars($organizer_id_to_approve) . ") approved successfully!</div>";
                 } else {
                     $message = "<div class='info-msg'>Organizer not found or already approved.</div>";
@@ -38,9 +39,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['approve_organizer_id']
     }
 }
 
-// --- Fetch organizers where is_approved = 0 ---
+// --- 3. Fetch all organizers where is_approved = 0 ---
 $pending_organizers = [];
-$sql = "SELECT id, name, email, id_proof FROM organizers WHERE is_approved = 0 ORDER BY created_at ASC";
+// Assuming 'created_at' for ordering, if not present, remove from ORDER BY
+$sql = "SELECT id, name, email, id_proof FROM organizers WHERE is_approved = 0 ORDER BY created_at ASC"; 
 
 if ($result = $conn->query($sql)) {
     if ($result->num_rows > 0) {
@@ -48,7 +50,7 @@ if ($result = $conn->query($sql)) {
             $pending_organizers[] = $row;
         }
     } else {
-        // Bonus: If there are no pending organizers
+        // 7. Display "No pending organizers" message if list is empty
         $message = "<div class='info-msg'>No pending organizers found for approval.</div>";
     }
     $result->free(); // Free result set
@@ -65,10 +67,10 @@ $conn->close(); // Close database connection after all operations
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Approve Organizers - Mero Events (Admin)</title>
-    <!-- External CSS: ../assets/css/style.css -->
+    <!-- Link to your main CSS file for consistent styling -->
     <link rel="stylesheet" href="../assets/css/style.css">
     <style>
-        /* Specific styling for the approve-organizers page */
+        /* 8. Use simple CSS for clean design */
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f7f6;
@@ -103,7 +105,7 @@ $conn->close(); // Close database connection after all operations
             font-size: 2.5em;
         }
 
-        /* Table Styling */
+        /* Clean HTML table layout */
         .organizers-table {
             width: 100%;
             border-collapse: collapse;
@@ -278,6 +280,7 @@ $conn->close(); // Close database connection after all operations
             <nav class="main-nav">
                 <a href="../index.php" class="site-logo">Mero Events (Admin)</a>
                 <ul class="nav-links">
+                    <!-- Link to admin dashboard -->
                     <li><a href="dashboard.php" class="btn btn-primary">Back to Dashboard</a></li> 
                     <li><a href="../admin-logout.php" class="btn btn-primary" style="background-color: #dc3545;">Logout</a></li>
                 </ul>
@@ -313,12 +316,14 @@ $conn->close(); // Close database connection after all operations
                                 <td><?php echo htmlspecialchars($organizer['email']); ?></td>
                                 <td>
                                     <?php if (!empty($organizer['id_proof'])): ?>
+                                        <!-- 4. Display ID proof file as clickable link -->
                                         <a href="../<?php echo htmlspecialchars($organizer['id_proof']); ?>" target="_blank" class="id-proof-link">View Proof</a>
                                     <?php else: ?>
-                                        No proof
+                                        No proof provided
                                     <?php endif; ?>
                                 </td>
                                 <td class="actions">
+                                    <!-- 5. Have an "Approve" button beside each organizer -->
                                     <form action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" method="post" onsubmit="return confirm('Are you sure you want to approve <?php echo htmlspecialchars($organizer['name']); ?>?');">
                                         <input type="hidden" name="approve_organizer_id" value="<?php echo $organizer['id']; ?>">
                                         <button type="submit" class="btn-approve">Approve</button>
@@ -329,10 +334,16 @@ $conn->close(); // Close database connection after all operations
                     </tbody>
                 </table>
             <?php else: ?>
-                <!-- Message "No pending organizers found for approval." is already handled via $message -->
-                <?php if (empty($message)) { // Fallback if $message somehow isn't set, though it should be
+                <!-- This message is set in the PHP logic if $pending_organizers is empty -->
+                <?php 
+                // Only show this specific message if no organizers were found and no other error message is present
+                // (This handles the case where $message might already contain an error from DB query)
+                if (strpos($message, 'No pending organizers') !== false) {
+                    echo $message;
+                } elseif (empty($message)) { // Fallback if $message is completely empty for some reason
                     echo "<div class='info-msg'>No pending organizers found for approval.</div>";
-                } ?>
+                }
+                ?>
             <?php endif; ?>
         </div>
     </main>
