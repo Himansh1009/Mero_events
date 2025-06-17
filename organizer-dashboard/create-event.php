@@ -1,55 +1,58 @@
 <?php
 // organizer-dashboard/create-event.php
 
-// 5. Enable error reporting
+// Enable full error reporting at the top
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-// 1. Include session protection to ensure only logged-in organizers can access this page
-require_once '../includes/session-organizer.php'; // Path to session-organizer.php from current location
-require_once '../includes/config.php';          // Path to config.php from current location
+// Use includes/session-organizer.php for session protection.
+require_once '../includes/session-organizer.php';
+// Use includes/config.php for database connection.
+require_once '../includes/config.php';
 
 // Initialize variables for form data and messages
 $event_title = $description = $event_date = $event_time = $location = $category = "";
+$total_tickets = ""; // New field initialization
 $message = "";
 
 // Get the organizer's ID from the session (guaranteed to be set by session-organizer.php)
 $organizer_id = $_SESSION["user_id"];
 
-// 6. Place the form handler and insert logic at the top
 // Process form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
-    // 2. Get and sanitize input from the form
+    // Get and sanitize input from the form
     $event_title = trim($_POST["event_title"]);
     $description = trim($_POST["description"]);
     $event_date = trim($_POST["event_date"]);
     $event_time = trim($_POST["event_time"]);
     $location = trim($_POST["location"]);
     $category = trim($_POST["category"]);
+    $total_tickets = trim($_POST["total_tickets"]); // Get new field value
 
-    // 3. Server-side validation: All fields must be filled
-    if (empty($event_title) || empty($description) || empty($event_date) || empty($event_time) || empty($location) || empty($category)) {
+    // Validate inputs (all fields required, tickets >= 1)
+    if (empty($event_title) || empty($description) || empty($event_date) || empty($event_time) || empty($location) || empty($category) || empty($total_tickets)) {
         $message = "<div class='error-msg'>All fields are required.</div>";
+    } elseif (!is_numeric($total_tickets) || $total_tickets < 1) {
+        $message = "<div class='error-msg'>Total Tickets Available must be a positive number.</div>";
     } else {
-        // 1. Insert all data into a MySQL table named `events` using prepared statements.
-        // `organizer_id` from $_SESSION['user_id']
-        // `status` defaults to 'pending' as per table definition, explicitly set here for clarity
-        // Note: 'image_path' column is removed as per the new `events` table structure provided.
-        $sql = "INSERT INTO events (title, description, event_date, event_time, location, category, organizer_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')";
+        // Insert into `events` table
+        // `tickets_booked` defaults to 0, `status` defaults to 'pending'
+        $sql = "INSERT INTO events (title, description, event_date, event_time, location, category, total_tickets, tickets_booked, organizer_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'pending')";
 
         if ($stmt = $conn->prepare($sql)) {
-            // Bind parameters to the prepared statement
-            // s: string, i: integer (for organizer_id)
+            // Bind parameters
+            // s: string, i: integer (for total_tickets and organizer_id)
             $stmt->bind_param(
-                "ssssssi", // 6 strings for title, desc, date, time, loc, category; 1 integer for organizer_id
+                "ssssssii", // 6 strings (title, desc, date, time, loc, category), 1 integer (total_tickets), 1 integer (organizer_id)
                 $param_title,
                 $param_description,
                 $param_event_date,
                 $param_event_time,
                 $param_location,
                 $param_category,
+                $param_total_tickets, // New parameter
                 $param_organizer_id
             );
 
@@ -60,17 +63,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $param_event_time = $event_time;
             $param_location = $location;
             $param_category = $category;
+            $param_total_tickets = $total_tickets; // Assign new parameter
             $param_organizer_id = $organizer_id; // Retrieved from session
 
             // Attempt to execute the prepared statement
             if ($stmt->execute()) {
-                // 3. Show a success message
-                $message = "<div class='success-msg'>Event created successfully! It is now pending approval.</div>";
+                // Show success message
+                $message = "<div class='success-msg'>Event submitted successfully and is pending admin approval.</div>";
                 
                 // Clear form fields after successful submission (since we don't redirect)
                 $event_title = $description = $event_date = $event_time = $location = $category = "";
+                $total_tickets = ""; // Clear new field as well
             } else {
-                // 3. Show the exact error if it fails
+                // Show error message
                 $message = "<div class='error-msg'>Error: Could not create event. " . $stmt->error . "</div>";
             }
 
@@ -91,10 +96,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create New Event - Mero Events</title>
-    <!-- 4. Link external stylesheet -->
+    <!-- Link to your main CSS file -->
     <link rel="stylesheet" href="../assets/css/style.css"> 
     <style>
-        /* 4. Basic styling to center the form in a card/box */
+        /* Basic styling to center the form in a card/box */
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f7f6;
@@ -143,6 +148,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         .form-group input[type="text"],
         .form-group input[type="date"],
         .form-group input[type="time"],
+        .form-group input[type="number"], /* Added for total_tickets */
         .form-group select,
         .form-group textarea {
             width: 100%;
@@ -373,6 +379,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <option value="Tech" <?php echo ($category == 'Tech') ? 'selected' : ''; ?>>Tech</option>
                         <option value="Community" <?php echo ($category == 'Community') ? 'selected' : ''; ?>>Community</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label for="total_tickets">Total Tickets Available:</label>
+                    <input type="number" id="total_tickets" name="total_tickets" min="1" value="<?php echo htmlspecialchars($total_tickets); ?>" required>
                 </div>
                 <div class="form-group">
                     <button type="submit" class="btn-submit">Create Event</button>

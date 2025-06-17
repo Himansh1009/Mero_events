@@ -1,4 +1,11 @@
 <?php
+// auth.php
+
+// Enable full error reporting at the top
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 session_start(); // Start the session at the very beginning
 
 // Include the database configuration
@@ -7,7 +14,7 @@ require_once 'includes/config.php';
 // Initialize variables for form data and messages
 $message = "";
 $action_type = "login"; // Default to login view
-$selected_user_type = ""; // To pre-select user type in form, defaults to 'user' for new forms
+$selected_user_type = ""; // To pre-select user type in form, defaults to 'user' if not set
 
 // Variables for registration form fields (to retain values on error)
 $reg_name = $reg_email = $reg_password = $reg_confirm_password = "";
@@ -44,7 +51,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $reg_password = $_POST['password'];
         $reg_confirm_password = $_POST['confirm_password'];
 
-        // 1. Registration Validation: All fields required
+        // Registration Logic: Validate all fields
         if (empty($reg_name) || empty($reg_email) || empty($reg_password) || empty($reg_confirm_password) || empty($selected_user_type)) {
             $message = "<div class='error-msg'>All fields are required.</div>";
         } 
@@ -59,7 +66,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $table = ($selected_user_type == 'organizer') ? 'organizers' : 'users';
             $redirect_dashboard = ($selected_user_type == 'organizer') ? 'organizer-dashboard/dashboard.php' : 'user-dashboard/dashboard.php';
 
-            // Check email uniqueness within the selected user type's table
+            // Check email uniqueness inside correct table based on selected role.
             $sql_check_email = "SELECT id FROM $table WHERE email = ?";
             if ($stmt_check = $conn->prepare($sql_check_email)) {
                 $stmt_check->bind_param("s", $param_email);
@@ -69,7 +76,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 if ($stmt_check->num_rows > 0) {
                     $message = "<div class='error-msg'>This email address is already registered as a " . htmlspecialchars($selected_user_type) . ".</div>";
                 } else {
-                    // Handle ID Proof upload for organizers only
+                    // ID Proof upload (only required for organizers)
                     $id_proof_path = null;
                     $upload_error = false;
 
@@ -116,11 +123,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         $hashed_password = password_hash($reg_password, PASSWORD_DEFAULT);
 
                         if ($selected_user_type == 'organizer') {
-                            $sql_insert = "INSERT INTO organizers (name, email, password, id_proof) VALUES (?, ?, ?, ?)";
+                            // Insert into organizers table (is_approved default 0)
+                            $sql_insert = "INSERT INTO organizers (name, email, password, id_proof, is_approved) VALUES (?, ?, ?, ?, 0)";
                             if ($stmt_insert = $conn->prepare($sql_insert)) {
                                 $stmt_insert->bind_param("ssss", $reg_name, $reg_email, $hashed_password, $id_proof_path);
                             }
                         } else { // 'user'
+                            // Insert into users table
                             $sql_insert = "INSERT INTO users (name, email, password) VALUES (?, ?, ?)";
                             if ($stmt_insert = $conn->prepare($sql_insert)) {
                                 $stmt_insert->bind_param("sss", $reg_name, $reg_email, $hashed_password);
@@ -128,14 +137,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         }
 
                         if (isset($stmt_insert) && $stmt_insert->execute()) {
-                            // Registration successful, set session variables
+                            // On successful registration: Set sessions & Redirect
                             $_SESSION["logged_in"] = true;
                             $_SESSION["user_id"] = $conn->insert_id; // ID of the newly registered user/organizer
                             $_SESSION["user_name"] = $reg_name;
                             $_SESSION["user_email"] = $reg_email; // Store email in session
                             $_SESSION["user_type"] = $selected_user_type;
 
-                            // Redirect to respective dashboard
                             header("location: $redirect_dashboard");
                             exit();
                         } else {
@@ -157,7 +165,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $login_email = trim($_POST['login_email']);
         $login_password = $_POST['login_password'];
 
-        // 1. Login Validation: Both fields and role must be filled
+        // Login Logic: Validate inputs
         if (empty($login_email) || empty($login_password) || empty($selected_user_type)) {
             $message = "<div class='error-msg'>Please enter email, password, and select your role.</div>";
         } else {
@@ -165,7 +173,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $redirect_dashboard = ($selected_user_type == 'organizer') ? 'organizer-dashboard/dashboard.php' : 'user-dashboard/dashboard.php';
 
             // Prepare a select statement to fetch credentials
-            $sql_login = "SELECT id, name, password, is_approved FROM $table WHERE email = ?"; // Added email to select for session
+            // For organizer, also fetch is_approved status
+            $sql_login = ($selected_user_type == 'organizer') ? 
+                         "SELECT id, name, email, password, is_approved FROM $table WHERE email = ?" :
+                         "SELECT id, name, email, password FROM $table WHERE email = ?";
+
             if ($stmt_login = $conn->prepare($sql_login)) {
                 $stmt_login->bind_param("s", $param_email);
                 $param_email = $login_email;
@@ -173,31 +185,39 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $stmt_login->store_result();
 
                 if ($stmt_login->num_rows == 1) {
-                    $stmt_login->bind_result($id, $name, $hashed_password, $is_approved); // Bind email from DB
+                    $user_id_db = $user_name_db = $user_email_db = $hashed_password_db = null;
+                    $is_approved_db = null;
+
+                    if ($selected_user_type == 'organizer') {
+                        $stmt_login->bind_result($user_id_db, $user_name_db, $user_email_db, $hashed_password_db, $is_approved_db);
+                    } else { // 'user'
+                        $stmt_login->bind_result($user_id_db, $user_name_db, $user_email_db, $hashed_password_db);
+                    }
                     $stmt_login->fetch();
 
                     // Verify the password using password_verify()
-                    if (password_verify($login_password, $hashed_password)) {
-                        // Password is correct, create PHP session
-                        if ($selected_user_type == 'organizer' && $is_approved == 0) {
-                            $message = "<div class='error-msg'>Your account is pending admin approval.</div>";
+                    if (password_verify($login_password, $hashed_password_db)) {
+                        // For organizer, also check if is_approved = 0
+                        if ($selected_user_type == 'organizer' && $is_approved_db == 0) {
+                            $message = "<div class='error-msg'>Your organizer account is pending admin approval.</div>";
                         } else {
-                            // Proceed with session setup and redirect
+                            // Password is correct and account is approved (if organizer), set PHP session
                             $_SESSION["logged_in"] = true;
-                            $_SESSION["user_id"] = $id;
-                            $_SESSION["user_name"] = $name;
-                            $_SESSION["user_type"] = $selected_user_type;
-                        
-                            $redirect_dashboard = ($selected_user_type == 'organizer') ? 'organizer-dashboard/dashboard.php' : 'user-dashboard/dashboard.php';
+                            $_SESSION["user_id"] = $user_id_db;
+                            $_SESSION["user_name"] = $user_name_db;
+                            $_SESSION["user_email"] = $user_email_db;
+                            $_SESSION["user_type"] = $selected_user_type; // Store user type in session
+
+                            // Redirect user to respective dashboard page
                             header("location: $redirect_dashboard");
-                            exit();
-                        } // Always exit after a header redirect
+                            exit(); // Always exit after a header redirect
+                        }
                     } else {
-                        $message = "<div class='error-msg'>The password you entered was not valid.</div>";
+                        $message = "<div class='error-msg'>Invalid email or password.</div>"; // Generic message for security
                     }
                 } else {
                     // Email doesn't exist for the selected role
-                    $message = "<div class='error-msg'>No account found with that email address for the selected role.</div>";
+                    $message = "<div class='error-msg'>Invalid email or password.</div>"; // Generic message for security
                 }
                 $stmt_login->close();
             } else {
@@ -249,7 +269,7 @@ $conn->close(); // Close database connection after all operations
             font-size: 2em;
         }
 
-        /* Toggle buttons for Login/Register */
+        /* Toggle buttons for switching between Login and Register views */
         .auth-toggle {
             margin-bottom: 30px;
             display: flex;
