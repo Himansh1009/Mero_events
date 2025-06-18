@@ -1,96 +1,110 @@
 <?php
 session_start(); // Start the session to access $_SESSION variables
 
-// Connect to the MySQL database
+// Use includes/config.php for DB connection.
 require_once 'includes/config.php';
 
 $event = null; // Variable to store event details
 $message = ""; // For displaying feedback messages to the user
-$event_id = null; // Initialize event ID for tracking
+$event_id_to_fetch = null; // To store event_id from GET or POST for consistent fetching
 
-// Assume user is logged in if session variables are set and user_type is 'user'
+// Check if user is logged in as a 'user'
 $is_logged_in_user = (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true && isset($_SESSION['user_type']) && $_SESSION['user_type'] === 'user');
 $user_id = $is_logged_in_user ? $_SESSION['user_id'] : null;
 
-// --- Handle Ticket Booking Form Submission ---
+$has_booked_already = false; // Flag to check if the current user has already booked this event
+
+// --- Handle Ticket Booking Form Submission (POST request) ---
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])) {
     $booking_event_id = trim($_POST['event_id']);
-    $num_tickets = trim($_POST['num_tickets']);
+    $num_tickets_requested = trim($_POST['num_tickets']);
 
-    // Validate inputs
-    if (empty($booking_event_id) || !is_numeric($booking_event_id) || empty($num_tickets) || !is_numeric($num_tickets) || $num_tickets <= 0) {
+    // Keep the event_id for re-fetching and sticky form fields after POST
+    $event_id_to_fetch = $booking_event_id;
+
+    // Validate initial inputs
+    if (empty($booking_event_id) || !is_numeric($booking_event_id) || empty($num_tickets_requested) || !is_numeric($num_tickets_requested) || $num_tickets_requested <= 0) {
         $message = "<div class='error-msg'>Invalid booking request. Please specify a positive number of tickets.</div>";
     } elseif (!$is_logged_in_user) {
-        $message = "<div class='error-msg'>You must be logged in as a user to book tickets.</div>";
+        // 1. If not logged in, show message
+        $message = "<div class='error-msg'>Please login to book tickets.</div>";
     } else {
-        // Start a transaction for atomic update (booking and tickets_booked update)
+        // Start a transaction for atomic operations (either all succeed or all fail)
         $conn->begin_transaction();
 
         try {
-            // Check if user has already booked this event
-            $sql_check_duplicate = "SELECT id FROM ticket_bookings WHERE user_id = ? AND event_id = ? FOR UPDATE"; // Lock for current user
+            // 2. Prevent duplicate booking (user should only book once per event).
+            // Check ticket_bookings table if user_id and event_id already exist.
+            $sql_check_duplicate = "SELECT id FROM ticket_bookings WHERE user_id = ? AND event_id = ? FOR UPDATE"; // FOR UPDATE for transactional integrity
             if ($stmt_duplicate = $conn->prepare($sql_check_duplicate)) {
                 $stmt_duplicate->bind_param("ii", $user_id, $booking_event_id);
                 $stmt_duplicate->execute();
                 $stmt_duplicate->store_result();
                 if ($stmt_duplicate->num_rows > 0) {
+                    // If already booked, show: "You have already booked this event."
                     throw new Exception("You have already booked this event.");
                 }
                 $stmt_duplicate->close();
             } else {
-                throw new Exception("Database error preparing duplicate booking check.");
+                throw new Exception("Database error preparing duplicate booking check: " . $conn->error);
             }
 
-            // 1. Get current ticket availability
-            $sql_check_tickets = "SELECT total_tickets, tickets_booked FROM events WHERE id = ? AND status = 'approved' FOR UPDATE"; // FOR UPDATE locks row
+            // Fetch current ticket availability and lock the event row
+            $sql_check_tickets = "SELECT total_tickets, tickets_booked FROM events WHERE id = ? AND status = 'approved' FOR UPDATE"; 
             if ($stmt_check = $conn->prepare($sql_check_tickets)) {
                 $stmt_check->bind_param("i", $booking_event_id);
                 $stmt_check->execute();
                 $result_check = $stmt_check->get_result();
                 
                 if ($result_check->num_rows == 0) {
-                    throw new Exception("Event not found or not approved.");
+                    throw new Exception("Event not found or is not approved.");
                 }
                 
                 $row_tickets = $result_check->fetch_assoc();
-                $available_tickets = $row_tickets['total_tickets'] - $row_tickets['tickets_booked'];
+                $current_tickets_booked = $row_tickets['tickets_booked'];
+                $total_tickets_available = $row_tickets['total_tickets'];
+                $remaining_tickets = $total_tickets_available - $current_tickets_booked;
 
-                if ($num_tickets > $available_tickets) {
-                    throw new Exception("Not enough tickets available. Only " . $available_tickets . " tickets remaining.");
+                // Validate that requested tickets are within availability
+                if ($num_tickets_requested > $remaining_tickets) {
+                    throw new Exception("Not enough tickets available. Only " . $remaining_tickets . " ticket(s) remaining.");
                 }
                 $stmt_check->close();
 
-                // 2. Insert booking into ticket_bookings table
-                $sql_insert_booking = "INSERT INTO ticket_bookings (user_id, event_id, num_tickets) VALUES (?, ?, ?)";
+                // Insert booking into ticket_bookings table
+                // Columns: user_id, event_id, tickets_booked (storing quantity for THIS booking)
+                $sql_insert_booking = "INSERT INTO ticket_bookings (user_id, event_id, tickets_booked) VALUES (?, ?, ?)";
                 if ($stmt_insert = $conn->prepare($sql_insert_booking)) {
-                    $stmt_insert->bind_param("iii", $user_id, $booking_event_id, $num_tickets);
+                    $stmt_insert->bind_param("iii", $user_id, $booking_event_id, $num_tickets_requested);
                     if (!$stmt_insert->execute()) {
                         throw new Exception("Failed to record booking: " . $stmt_insert->error);
                     }
                     $stmt_insert->close();
                 } else {
-                    throw new Exception("Database error preparing booking insert.");
+                    throw new Exception("Database error preparing booking insert: " . $conn->error);
                 }
 
-                // 3. Update tickets_booked in events table
+                // Update tickets_booked count in events table accordingly.
                 $sql_update_event = "UPDATE events SET tickets_booked = tickets_booked + ? WHERE id = ?";
                 if ($stmt_update = $conn->prepare($sql_update_event)) {
-                    $stmt_update->bind_param("ii", $num_tickets, $booking_event_id);
+                    $stmt_update->bind_param("ii", $num_tickets_requested, $booking_event_id);
                     if (!$stmt_update->execute()) {
                         throw new Exception("Failed to update event ticket count: " . $stmt_update->error);
                     }
                     $stmt_update->close();
                 } else {
-                    throw new Exception("Database error preparing event update.");
+                    throw new Exception("Database error preparing event update: " . $conn->error);
                 }
 
                 $conn->commit(); // Commit the transaction
-                $message = "<div class='success-msg'>Successfully booked " . htmlspecialchars($num_tickets) . " ticket(s)!</div>";
+                $message = "<div class='success-msg'>Successfully booked " . htmlspecialchars($num_tickets_requested) . " ticket(s)!</div>";
                 
-                // To ensure updated tickets_remaining is displayed, re-fetch event data.
-                // This will happen automatically via the GET logic below after POST is handled.
+                // Set the flag as user has just successfully booked
+                $has_booked_already = true; 
+                // Event data will be re-fetched by the GET logic below to show updated state.
+
             } else {
-                throw new Exception("Database error checking tickets (availability check).");
+                throw new Exception("Database error checking tickets availability: " . $conn->error);
             }
         } catch (Exception $e) {
             $conn->rollback(); // Rollback on error
@@ -100,13 +114,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])
 }
 
 
-// --- Fetch Event Details (for initial load or after booking attempt) ---
-// Get the event ID from the URL
-if (isset($_GET['id']) && is_numeric($_GET['id'])) {
-    $event_id = $_GET['id'];
+// --- Event Fetch Logic (GET request for initial load OR after POST) ---
+// Get event_id via GET parameter
+if (isset($_GET['event_id']) && is_numeric($_GET['event_id'])) {
+    $event_id_to_fetch = $_GET['event_id']; // Use the GET ID if no POST
+}
 
-    // Fetch the event from the events table using that ID
-    // Join with organizers to get the organizer's name
+if ($event_id_to_fetch !== null) {
+    // Fetch full event details from events table, joining organizers table to get organizer name.
+    // Only show event if status = ‘approved’.
     $sql = "SELECT 
                 e.id, 
                 e.title, 
@@ -123,14 +139,32 @@ if (isset($_GET['id']) && is_numeric($_GET['id'])) {
             JOIN 
                 organizers o ON e.organizer_id = o.id
             WHERE 
-                e.id = ? AND e.status = 'approved'"; // Only show approved events
+                e.id = ? AND e.status = 'approved'"; 
 
     if ($stmt = $conn->prepare($sql)) {
-        $stmt->bind_param("i", $event_id);
+        $stmt->bind_param("i", $event_id_to_fetch);
         if ($stmt->execute()) {
             $result = $stmt->get_result();
             if ($result->num_rows == 1) {
                 $event = $result->fetch_assoc();
+
+                // After fetching the event, if user is logged in, check for existing booking for DISPLAY
+                if ($is_logged_in_user && !$has_booked_already) { // Only re-check if not already set to true by POST
+                    $sql_check_existing_booking = "SELECT id FROM ticket_bookings WHERE user_id = ? AND event_id = ?";
+                    if ($stmt_existing_booking = $conn->prepare($sql_check_existing_booking)) {
+                        $stmt_existing_booking->bind_param("ii", $user_id, $event['id']);
+                        $stmt_existing_booking->execute();
+                        $stmt_existing_booking->store_result();
+                        if ($stmt_existing_booking->num_rows > 0) {
+                            $has_booked_already = true;
+                        }
+                        $stmt_existing_booking->close();
+                    } else {
+                        // This error might not block page load but log it
+                        error_log("Database error checking existing booking: " . $conn->error);
+                    }
+                }
+
             } else {
                 $message = "<div class='error-msg'>Event not found or is not approved.</div>";
             }
@@ -156,6 +190,7 @@ $conn->close(); // Close the database connection
     <title>Event Details - Mero Events</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
+        /* Use simple clean Bootstrap or responsive CSS. */
         /* Specific styling for event-details.php */
         body {
             font-family: Arial, sans-serif;
@@ -298,7 +333,7 @@ $conn->close(); // Close the database connection
         .booking-section button:hover {
             background-color: #218838;
         }
-        .login-to-book {
+        .login-to-book, .already-booked-msg {
             font-size: 1.1em;
             color: #555;
             margin-top: 20px;
@@ -355,7 +390,6 @@ $conn->close(); // Close the database connection
                     
                     <?php
                     // Dynamic Login/Dashboard/Logout links for the navbar
-                    // This section is public, so check session status
                     if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true) {
                         $dashboard_link = '#'; // Default fallback
                         
@@ -418,7 +452,6 @@ $conn->close(); // Close the database connection
                             <strong>Tickets Remaining</strong>
                             <span>
                                 <?php 
-                                // Calculate: remaining_tickets = total_tickets - tickets_booked
                                 $tickets_remaining = $event['total_tickets'] - $event['tickets_booked'];
                                 echo htmlspecialchars($tickets_remaining);
                                 ?>
@@ -433,26 +466,28 @@ $conn->close(); // Close the database connection
 
                     <div class="booking-section">
                         <h3>Book Your Tickets</h3>
-                        <?php if ($tickets_remaining > 0): // Only show form if tickets are available ?>
+                        <?php if ($tickets_remaining > 0): // Show booking form if tickets are available ?>
                             <p class="tickets-remaining"><?php echo htmlspecialchars($tickets_remaining); ?> tickets remaining!</p>
                             
-                            <?php if ($is_logged_in_user): ?>
-                                <form action="event-details.php?id=<?php echo htmlspecialchars($event_id); ?>" method="post">
-                                    <input type="hidden" name="event_id" value="<?php echo htmlspecialchars($event_id); ?>">
-                                    <div class="form-group">
-                                        <label for="num_tickets">Number of Tickets:</label>
-                                        <!-- Input field: "Number of Tickets" (allow user to select between 1 and remaining_tickets) -->
-                                        <input type="number" id="num_tickets" name="num_tickets" min="1" max="<?php echo htmlspecialchars($tickets_remaining); ?>" value="1" required>
-                                    </div>
-                                    <!-- Submit button: "Book Tickets" -->
-                                    <button type="submit" name="book_tickets_submit">Book Now</button>
-                                </form>
-                            <?php else: ?>
+                            <?php if ($is_logged_in_user): // If user is logged in ?>
+                                <?php if ($has_booked_already): // Check if user has already booked ?>
+                                    <p class="already-booked-msg">You have already booked this event.</p>
+                                <?php else: // User is logged in and hasn't booked yet ?>
+                                    <form action="" method="post">
+                                        <input type="hidden" name="event_id" value="<?php echo htmlspecialchars($event['id']); ?>">
+                                        <div class="form-group">
+                                            <label for="num_tickets">Number of Tickets:</label>
+                                            <input type="number" id="num_tickets" name="num_tickets" min="1" max="<?php echo htmlspecialchars($tickets_remaining); ?>" value="1" required>
+                                        </div>
+                                        <button type="submit" name="book_tickets_submit">Book Now</button>
+                                    </form>
+                                <?php endif; ?>
+                            <?php else: // If not logged in, show message ?>
                                 <p class="login-to-book">Please <a href="auth.php?action=login">log in</a> as a user to book tickets.</p>
                             <?php endif; ?>
 
                         <?php else: // tickets_remaining is 0 or less ?>
-                            <!-- Display "Sold Out" message and hide booking form -->
+                            <!-- If tickets sold out: Show "Sold Out" message and hide booking form. -->
                             <p class="tickets-sold-out">❗ This event is sold out.</p>
                         <?php endif; ?>
                     </div>

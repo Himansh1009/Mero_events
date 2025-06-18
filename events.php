@@ -1,29 +1,37 @@
 <?php
-// events.php
+// events.php (or browse-events.php)
 
-// This page does NOT require login. It is accessible to all users.
-session_start(); // Start session to check login status for navbar links
+session_start(); // PHP session for navbar
 
-// 1. Connect to the MySQL database
+// Use includes/config.php for database connection.
 require_once 'includes/config.php';
 
 $events = []; // Initialize an empty array to store fetched events
 $message = ""; // To display any messages (e.g., no events found)
 
-// 2. Fetch all events where status = 'approved'
-// Assumed columns: id, title, event_date, event_time, location, status
+// Fetch Events:
+// Query events where status = 'approved'
+// JOIN organizers table for organizer name
+// SELECT e.id (very important!)
+// Order by event_date ASC
 $sql = "SELECT 
-            id, 
-            title, 
-            event_date, 
-            event_time, 
-            location 
+            e.id,           /* VERY IMPORTANT: e.id included for links */
+            e.title, 
+            e.event_date, 
+            e.event_time, 
+            e.location, 
+            e.category, 
+            e.total_tickets, 
+            e.tickets_booked,
+            o.name AS organizer_name 
         FROM 
-            events 
+            events e
+        JOIN 
+            organizers o ON e.organizer_id = o.id
         WHERE 
-            status = 'approved'
+            e.status = 'approved'
         ORDER BY 
-            event_date ASC, event_time ASC"; // Order by date and time to show upcoming events first
+            e.event_date ASC, e.event_time ASC"; 
 
 if ($result = $conn->query($sql)) {
     if ($result->num_rows > 0) {
@@ -31,12 +39,13 @@ if ($result = $conn->query($sql)) {
             $events[] = $row;
         }
     } else {
-        // 6. Handle the case where no events are available
-        $message = "<div class='info-msg'>No approved events found at the moment. Please check back later!</div>";
+        // If no events found, display: “No upcoming events found.”
+        $message = "<div class='info-msg'>No upcoming events found.</div>";
     }
     $result->free(); // Free result set
 } else {
-    $message = "<div class='error-msg'>Error retrieving events: " . $conn->error . "</div>";
+    // Handle SQL errors gracefully.
+    $message = "<div class='error-msg'>Error retrieving events from database: " . $conn->error . "</div>";
 }
 
 $conn->close(); // Close the database connection
@@ -47,11 +56,11 @@ $conn->close(); // Close the database connection
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Browse Events - Mero Events</title>
-    <!-- 5. Use external stylesheet -->
+    <title>Browse All Events - Mero Events</title>
+    <!-- Use Bootstrap or clean responsive CSS for nice layout -->
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
-        /* Specific styling for the events page (card layout) */
+        /* Specific styling for the browse-events page */
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f7f6;
@@ -84,7 +93,7 @@ $conn->close(); // Close the database connection
             margin: 0 auto;
         }
 
-        /* 5. Use flexbox or grid to show events responsively (Flexbox for cards) */
+        /* Responsive grid system for cards */
         .events-grid {
             display: flex;
             flex-wrap: wrap; /* Allow cards to wrap to the next line */
@@ -93,17 +102,18 @@ $conn->close(); // Close the database connection
             align-items: stretch; /* Make cards stretch to equal height */
         }
 
+        /* Card-based layout for event listings. */
         .event-card {
             background-color: #fff;
             border-radius: 8px;
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
             padding: 25px;
-            flex: 1 1 calc(33% - 40px); /* Approx 3 cards per row, accounting for gap */
+            flex: 1 1 calc(33.333% - 40px); /* Roughly 3 cards per row, accounting for gap */
             min-width: 280px; /* Minimum width for responsiveness */
             max-width: 380px; /* Max width to prevent cards from becoming too wide */
             display: flex;
             flex-direction: column;
-            justify-content: space-between; /* Push 'View Details' button to bottom */
+            justify-content: space-between; /* Push action area to bottom */
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
@@ -119,35 +129,68 @@ $conn->close(); // Close the database connection
             line-height: 1.3;
         }
 
-        .event-info {
+        .event-info-block {
             font-size: 1em;
             color: #666;
-            margin-bottom: 20px;
+            margin-bottom: 20px; /* Space before action area */
         }
         
-        .event-info p {
+        .event-info-block p {
             margin: 0 0 8px 0; /* Adjust margin for paragraphs within info block */
         }
 
-        .event-info strong {
+        .event-info-block strong {
             color: #333;
         }
+        
+        .event-info-block .tickets-info {
+            font-weight: bold;
+        }
+        .event-info-block .tickets-remaining-count {
+            color: #28a745; /* Green for remaining */
+        }
+        .event-info-block .tickets-sold-out-count {
+            color: #dc3545; /* Red for sold out */
+        }
 
-        .event-card .details-button {
+        .event-card .action-area {
+            /* Ensures button is at the bottom, separate from info */
+            padding-top: 15px; /* Space above the button */
+            border-top: 1px solid #eee;
+            text-align: center; /* Center the button within its area */
+        }
+        
+        .event-card .book-button {
             display: inline-block;
-            background-color: #28a745;
+            background-color: #007bff; /* Using btn-primary color */
             color: #fff;
-            padding: 10px 15px;
+            padding: 10px 20px; /* Standard button padding */
             border-radius: 5px;
             text-decoration: none;
             font-weight: bold;
-            margin-top: 15px; /* Space above the button */
-            align-self: flex-start; /* Align button to the left within the card */
             transition: background-color 0.3s ease;
         }
 
-        .event-card .details-button:hover {
-            background-color: #218838;
+        .event-card .book-button:hover {
+            background-color: #0056b3; /* Darker blue on hover */
+        }
+        
+        .event-card .sold-out-badge {
+            background-color: #dc3545; /* Red for sold out */
+            color: #fff;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            display: inline-block; /* For proper padding and centering */
+        }
+        
+        .event-card .book-button.disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            pointer-events: none; /* Disable click */
+            opacity: 0.7; /* Make it look disabled */
         }
 
         /* Responsive adjustments for events grid */
@@ -251,7 +294,7 @@ $conn->close(); // Close the database connection
             white-space: nowrap;
         }
         
-        .btn {
+        .btn { /* Basic .btn from style.css for consistent button styling */
             display: inline-block;
             padding: 10px 20px;
             border-radius: 5px;
@@ -261,7 +304,7 @@ $conn->close(); // Close the database connection
             text-decoration: none;
         }
 
-        .btn-primary {
+        .btn-primary { /* Primary button style */
             background-color: #007bff;
             color: #fff;
             border: 1px solid #007bff;
@@ -300,8 +343,7 @@ $conn->close(); // Close the database connection
                     <li><a href="contact.php">Contact</a></li>
                     
                     <?php
-                    // Dynamic Login/Dashboard/Logout links (reused logic from index.php)
-                    // This section is public, so check session status
+                    // Dynamic Login/Dashboard/Logout links for the navbar
                     if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true) {
                         $dashboard_link = '#'; // Default fallback
                         
@@ -328,7 +370,7 @@ $conn->close(); // Close the database connection
     <main>
         <div class="container">
             <div class="events-header">
-                <h1>Browse All Approved Events</h1>
+                <h1>Explore All Approved Events</h1>
                 <p>Discover a variety of engaging educational programs, community gatherings, and student initiatives happening in Bharatpur, Nepal. Your next experience is just a click away!</p>
             </div>
 
@@ -341,18 +383,41 @@ $conn->close(); // Close the database connection
 
             <?php if (!empty($events)): ?>
                 <div class="events-grid">
-                    <?php foreach ($events as $event): ?>
+                    <?php foreach ($events as $event): 
+                        // Calculate Tickets Remaining
+                        $tickets_remaining = $event['total_tickets'] - $event['tickets_booked'];
+                        $is_sold_out = ($tickets_remaining <= 0);
+                    ?>
                         <div class="event-card">
                             <div>
                                 <h3><?php echo htmlspecialchars($event['title']); ?></h3>
-                                <div class="event-info">
+                                <div class="event-info-block">
                                     <p><strong>Date:</strong> <?php echo htmlspecialchars(date('M d, Y', strtotime($event['event_date']))); ?></p>
                                     <p><strong>Time:</strong> <?php echo htmlspecialchars(date('h:i A', strtotime($event['event_time']))); ?></p>
                                     <p><strong>Location:</strong> <?php echo htmlspecialchars($event['location']); ?></p>
+                                    <p><strong>Category:</strong> <?php echo htmlspecialchars($event['category']); ?></p>
+                                    <p><strong>Organizer:</strong> <?php echo htmlspecialchars($event['organizer_name']); ?></p>
+                                    <p class="tickets-info">
+                                        <strong>Tickets:</strong> 
+                                        <?php if ($is_sold_out): ?>
+                                            <span class="tickets-sold-out-count">Sold Out</span> (<?php echo htmlspecialchars($event['tickets_booked']); ?>/<?php echo htmlspecialchars($event['total_tickets']); ?>)
+                                        <?php else: ?>
+                                            <span class="tickets-remaining-count"><?php echo htmlspecialchars($tickets_remaining); ?></span> remaining
+                                            (<?php echo htmlspecialchars($event['tickets_booked']); ?>/<?php echo htmlspecialchars($event['total_tickets']); ?> booked)
+                                        <?php endif; ?>
+                                    </p>
                                 </div>
                             </div>
-                            <!-- 4. Each "View Details" button should link to event-details.php?id=EVENT_ID -->
-                            <a href="event-details.php?id=<?php echo htmlspecialchars($event['id']); ?>" class="details-button">View Details</a>
+                            <div class="action-area">
+                                <?php if ($is_sold_out): ?>
+                                    <!-- Display “Sold Out” badge and disable the Book Now button. -->
+                                    <span class="sold-out-badge">Sold Out</span>
+                                <?php else: ?>
+                                    <!-- A "Book Now" button that links properly -->
+                                    <!-- Note: Using 'id' parameter for consistency with event-details.php as previously generated. -->
+                                    <a href="event-details.php?event_id=<?php echo htmlspecialchars($event['id']); ?>" class="btn btn-primary book-button">Book Now</a>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     <?php endforeach; ?>
                 </div>
