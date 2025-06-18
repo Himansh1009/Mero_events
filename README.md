@@ -46,3 +46,6 @@ Mero Events aims to be a centralized platform for local communities and students
 
 
 
+📝 Note:
+
+A helper script create-admin.php is included in the repository to simplify admin account creation. You can use this script to securely create Admin accounts with hashed passwords for the Admin Panel. After running the script and successfully creating an admin, you may delete or secure this file for safety.
