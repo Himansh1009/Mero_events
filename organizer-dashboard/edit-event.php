@@ -1,42 +1,57 @@
 <?php
 // organizer-dashboard/edit-event.php
 
-// 1. Protect the page
-require_once '../includes/session-organizer.php'; // Path to session-organizer.php
-require_once '../includes/config.php';          // Path to config.php
+// Enable full error reporting at the top
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+// Use session protection
+require_once '../includes/session-organizer.php';
+require_once '../includes/config.php';
 
 // Initialize variables
 $event_id = null;
 $event_title = $description = $event_date = $event_time = $location = $category = "";
+$total_tickets = ""; // Also fetch total_tickets
 $message = "";
-$organizer_id = $_SESSION["user_id"]; // Get current organizer's ID from session
+$organizer_id = $_SESSION["user_id"];
+
+// Directory for event image uploads (relative to project root from edit-event.php)
+$upload_dir = '../event-images/'; 
+if (!is_dir($upload_dir)) {
+    mkdir($upload_dir, 0777, true);
+}
+$default_image_path = 'event-images/default.jpg'; 
+$current_image_path = ''; // To store the image path currently in DB
 
 // --- Handle GET Request (Initial Load) ---
-// 2. Accept the event id via GET
-if (isset($_GET['id']) && is_numeric($_GET['id'])) {
-    $event_id = $_GET['id'];
+// Accept the event id via GET: event_id
+if (isset($_GET['event_id']) && is_numeric($_GET['event_id'])) {
+    $event_id = $_GET['event_id'];
 
-    // 3. Fetch event data from events table:
+    // Fetch existing event details from the database
     // Verify that the event belongs to the logged-in organizer
-    $sql = "SELECT title, description, event_date, event_time, location, category FROM events WHERE id = ? AND organizer_id = ?";
+    // Also fetch total_tickets and image_path
+    $sql = "SELECT title, description, event_date, event_time, location, category, total_tickets, image_path FROM events WHERE id = ? AND organizer_id = ?";
 
     if ($stmt = $conn->prepare($sql)) {
         $stmt->bind_param("ii", $event_id, $organizer_id);
         if ($stmt->execute()) {
             $result = $stmt->get_result();
             if ($result->num_rows == 1) {
-                // Event found and belongs to this organizer, pre-populate form fields
-                $event = $result->fetch_assoc();
-                $event_title = $event['title'];
-                $description = $event['description'];
-                $event_date = $event['event_date'];
-                $event_time = $event['event_time'];
-                $location = $event['location'];
-                $category = $event['category'];
+                $event_data = $result->fetch_assoc();
+                $event_title = $event_data['title'];
+                $description = $event_data['description'];
+                $event_date = $event_data['event_date'];
+                $event_time = $event_data['event_time'];
+                $location = $event_data['location'];
+                $category = $event_data['category'];
+                $total_tickets = $event_data['total_tickets']; // Populate total_tickets
+                $current_image_path = $event_data['image_path']; // Store current image path
             } else {
-                // Event not found or does not belong to this organizer
                 $message = "<div class='error-msg'>Event not found or you don't have permission to edit it.</div>";
-                $event_id = null; // Invalidate ID to prevent showing the form
+                $event_id = null; // Invalidate ID to prevent showing form
             }
         } else {
             $message = "<div class='error-msg'>Error fetching event details: " . $stmt->error . "</div>";
@@ -48,82 +63,121 @@ if (isset($_GET['id']) && is_numeric($_GET['id'])) {
         $event_id = null;
     }
 } else {
-    // No valid event ID provided in URL
     $message = "<div class='error-msg'>No event ID provided or invalid ID.</div>";
-    $event_id = null; // Invalidate ID to prevent showing the form
+    $event_id = null;
 }
 
 
-// --- 5. On form submit (POST) ---
+// --- Handle POST Request (Form Submission) ---
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Get event ID from hidden field, not from GET parameter for POST submission
-    $event_id = trim($_POST["event_id"]);
-
-    // Get and sanitize input
+    $event_id_to_update = trim($_POST["event_id"]); // From hidden field
+    
+    // Re-populate variables for sticky form fields in case of validation errors
     $event_title = trim($_POST["event_title"]);
     $description = trim($_POST["description"]);
     $event_date = trim($_POST["event_date"]);
     $event_time = trim($_POST["event_time"]);
     $location = trim($_POST["location"]);
     $category = trim($_POST["category"]);
+    $total_tickets = trim($_POST["total_tickets"]);
+    
+    // Get original image path for fallback if no new image is uploaded
+    $image_path_for_db = trim($_POST['current_image_path']); 
+    $upload_error = false;
 
-    // Validate all inputs
-    if (empty($event_id) || !is_numeric($event_id) || empty($event_title) || empty($description) || empty($event_date) || empty($event_time) || empty($location) || empty($category)) {
+    // Validate inputs
+    if (empty($event_id_to_update) || !is_numeric($event_id_to_update) || empty($event_title) || empty($description) || empty($event_date) || empty($event_time) || empty($location) || empty($category) || empty($total_tickets)) {
         $message = "<div class='error-msg'>All fields are required and a valid Event ID must be present.</div>";
+    } elseif (!is_numeric($total_tickets) || $total_tickets < 1) {
+        $message = "<div class='error-msg'>Total Tickets Available must be a positive number.</div>";
     } else {
-        // Update the events table with new data
-        // Set status back to 'pending' after any edit (as per requirements)
-        $sql = "UPDATE events SET title = ?, description = ?, event_date = ?, event_time = ?, location = ?, category = ?, status = 'pending' WHERE id = ? AND organizer_id = ?";
+        // Handle new image upload
+        if (isset($_FILES['event_image']) && $_FILES['event_image']['error'] == UPLOAD_ERR_OK) {
+            $file_name = $_FILES['event_image']['name'];
+            $file_tmp_name = $_FILES['event_image']['tmp_name'];
+            $file_size = $_FILES['event_image']['size'];
+            $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
 
-        if ($stmt = $conn->prepare($sql)) {
-            // Bind parameters
-            // 8. Use prepared statements to avoid SQL injection
-            $stmt->bind_param(
-                "ssssssii", // 6 strings, 2 integers (event_id, organizer_id)
-                $param_title,
-                $param_description,
-                $param_event_date,
-                $param_event_time,
-                $param_location,
-                $param_category,
-                $param_event_id,
-                $param_organizer_id
-            );
+            $allowed_extensions = array("jpg", "jpeg", "png", "webp");
+            $max_file_size = 2 * 1024 * 1024; // 2 MB
 
-            // Set parameter values
-            $param_title = $event_title;
-            $param_description = $description;
-            $param_event_date = $event_date;
-            $param_event_time = $event_time;
-            $param_location = $location;
-            $param_category = $category;
-            $param_event_id = $event_id; // From hidden form field
-            $param_organizer_id = $organizer_id; // From session
-
-            // Attempt to execute the prepared statement
-            if ($stmt->execute()) {
-                if ($stmt->affected_rows > 0) {
-                    // Show success message
-                    $message = "<div class='success-msg'>Event updated successfully! Status set to 'pending' for re-approval.</div>";
-                } else {
-                    $message = "<div class='error-msg'>No changes made or event not found under your account.</div>";
-                }
+            if (!in_array($file_ext, $allowed_extensions)) {
+                $message = "<div class='error-msg'>Invalid image file type. Only JPG, JPEG, PNG, WEBP are allowed.</div>";
+                $upload_error = true;
+            } elseif ($file_size > $max_file_size) {
+                $message = "<div class='error-msg'>Image file is too large (max 2MB).</div>";
+                $upload_error = true;
             } else {
-                // Show error message
-                $message = "<div class='error-msg'>Error updating event: " . $stmt->error . "</div>";
-            }
+                $new_file_name = uniqid('event_img_', true) . '.' . $file_ext;
+                $destination = $upload_dir . $new_file_name;
+                $image_path_for_db = 'event-images/' . $new_file_name;
 
-            // Close statement
-            $stmt->close();
-        } else {
-            $message = "<div class='error-msg'>Database error: Could not prepare update statement.</div>";
+                if (!move_uploaded_file($file_tmp_name, $destination)) {
+                    $message = "<div class='error-msg'>Failed to upload new image. Check permissions.</div>";
+                    $upload_error = true;
+                } else {
+                    // Optional: Delete old image if it's not the default
+                    if (!empty($_POST['current_image_path']) && $_POST['current_image_path'] !== $default_image_path && file_exists('../' . $_POST['current_image_path'])) {
+                        unlink('../' . $_POST['current_image_path']);
+                    }
+                }
+            }
+        } elseif (isset($_FILES['event_image']) && $_FILES['event_image']['error'] != UPLOAD_ERR_NO_FILE) {
+            $message = "<div class='error-msg'>An upload error occurred for new image: Code " . $_FILES['event_image']['error'] . "</div>";
+            $upload_error = true;
+        }
+
+        // Only proceed with DB update if no validation or upload errors
+        if (empty($message) && !$upload_error) {
+            // Set status back to 'pending' after any edit (as per common requirement)
+            $sql = "UPDATE events SET title = ?, description = ?, event_date = ?, event_time = ?, location = ?, category = ?, total_tickets = ?, status = 'pending', image_path = ? WHERE id = ? AND organizer_id = ?";
+
+            if ($stmt = $conn->prepare($sql)) {
+                $stmt->bind_param(
+                    "ssssssiis", // 6 strings, 1 int, 1 int (total_tickets), 1 string (image_path), 1 int (id), 1 int (organizer_id)
+                    $param_title,
+                    $param_description,
+                    $param_event_date,
+                    $param_event_time,
+                    $param_location,
+                    $param_category,
+                    $param_total_tickets,
+                    $param_image_path, // New parameter
+                    $param_event_id,
+                    $param_organizer_id
+                );
+
+                $param_title = $event_title;
+                $param_description = $description;
+                $param_event_date = $event_date;
+                $param_event_time = $event_time;
+                $param_location = $location;
+                $param_category = $category;
+                $param_total_tickets = $total_tickets;
+                $param_image_path = $image_path_for_db; // Use new or existing path
+                $param_event_id = $event_id_to_update; 
+                $param_organizer_id = $organizer_id; 
+
+                if ($stmt->execute()) {
+                    if ($stmt->affected_rows > 0) {
+                        $message = "<div class='success-msg'>Event updated successfully! Status set to 'pending' for re-approval.</div>";
+                    } else {
+                        $message = "<div class='info-msg'>No changes made or event not found under your account.</div>";
+                    }
+                } else {
+                    $message = "<div class='error-msg'>Error updating event: " . $stmt->error . "</div>";
+                }
+                $stmt->close();
+            } else {
+                $message = "<div class='error-msg'>Database error: Could not prepare update statement.</div>";
+            }
         }
     }
-    // Note: $conn->close() is at the end of the script, outside the POST block,
-    // to allow it to be used for initial GET request as well.
+    // Set event_id for re-fetching after POST to show updated values
+    $event_id = $event_id_to_update; // Set for current display
 }
 
-$conn->close(); // Close database connection after all operations
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -131,12 +185,10 @@ $conn->close(); // Close database connection after all operations
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- 6. Page Title -->
     <title>Edit Event - Mero Events</title>
-    <!-- 7. External CSS -->
     <link rel="stylesheet" href="../assets/css/style.css"> 
     <style>
-        /* Basic styling to center the form in a card/box */
+        /* Reusing common styles from other pages for form layout */
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f7f6;
@@ -185,24 +237,26 @@ $conn->close(); // Close database connection after all operations
         .form-group input[type="text"],
         .form-group input[type="date"],
         .form-group input[type="time"],
+        .form-group input[type="number"],
         .form-group select,
-        .form-group textarea {
+        .form-group textarea,
+        .form-group input[type="file"] { /* Style for file input */
             width: 100%;
             padding: 12px;
             border: 1px solid #ddd;
             border-radius: 5px;
             font-size: 1em;
             box-sizing: border-box;
+            background-color: #f4f7f6; /* Consistent with other forms */
         }
-
         .form-group textarea {
             resize: vertical;
             min-height: 120px;
         }
-
         .form-group input:focus,
         .form-group select:focus,
-        .form-group textarea:focus {
+        .form-group textarea:focus,
+        .form-group input[type="file"]:focus {
             border-color: #007bff;
             outline: none;
             box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
@@ -220,12 +274,11 @@ $conn->close(); // Close database connection after all operations
             cursor: pointer;
             transition: background-color 0.3s ease;
         }
-
         .btn-submit:hover {
             background-color: #0056b3;
         }
 
-        /* Message styling */
+        /* Message styling (reusing from common styles) */
         .message {
             margin-bottom: 20px;
             padding: 12px;
@@ -233,121 +286,36 @@ $conn->close(); // Close database connection after all operations
             text-align: center;
             font-weight: bold;
         }
+        .success-msg { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error-msg { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info-msg { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
 
-        .success-msg {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+        /* Preview for current image */
+        .current-image-preview {
+            max-width: 150px;
+            height: auto;
+            display: block;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
         }
 
-        .error-msg {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
         /* Header/Footer styles (consistent with other pages) */
-        .main-header {
-            background-color: #fff;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            padding: 15px 0;
-        }
-
-        .main-nav {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .site-logo {
-            font-size: 1.8em;
-            font-weight: bold;
-            color: #333;
-            margin-right: 20px;
-            text-decoration: none;
-        }
-
-        .site-logo:hover {
-            color: #007bff;
-        }
-
-        .nav-links {
-            list-style: none;
-            display: flex;
-            align-items: center;
-            margin: 0;
-            padding: 0;
-        }
-
-        .nav-links li {
-            margin-left: 25px;
-        }
-
-        .nav-links a {
-            color: #555;
-            font-weight: 500;
-            padding: 5px 0;
-            transition: color 0.3s ease;
-            text-decoration: none;
-        }
-
-        .nav-links a:not(.btn):hover {
-            color: #007bff;
-        }
-
-        .welcome-message {
-            color: #555;
-            font-weight: 500;
-            margin-right: 15px;
-            white-space: nowrap;
-        }
-        
-        .btn { /* Basic button style from style.css */
-            display: inline-block;
-            padding: 10px 20px;
-            border-radius: 5px;
-            font-weight: bold;
-            text-align: center;
-            transition: background-color 0.3s ease;
-            text-decoration: none;
-        }
-
-        .btn-primary {
-            background-color: #007bff;
-            color: #fff;
-            border: 1px solid #007bff;
-        }
-
-        .btn-primary:hover {
-            background-color: #0056b3;
-            border-color: #0056b3;
-        }
-
-        .btn-secondary {
-            background-color: #28a745;
-            color: #fff;
-            border: 1px solid #28a745;
-        }
-
-        .btn-secondary:hover {
-            background-color: #218838;
-            border-color: #1e7e34;
-        }
-
-        .main-footer {
-            background-color: #333;
-            color: #fff;
-            text-align: center;
-            padding: 25px 0;
-            font-size: 0.9em;
-            margin-top: auto; /* Push footer to the bottom */
-            width: 100%;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 20px;
-        }
+        .main-header { background-color: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 15px 0; }
+        .main-nav { display: flex; justify-content: space-between; align-items: center; }
+        .site-logo { font-size: 1.8em; font-weight: bold; color: #333; margin-right: 20px; text-decoration: none; }
+        .site-logo:hover { color: #007bff; }
+        .nav-links { list-style: none; display: flex; align-items: center; margin: 0; padding: 0; }
+        .nav-links li { margin-left: 25px; }
+        .nav-links a { color: #555; font-weight: 500; padding: 5px 0; transition: color 0.3s ease; text-decoration: none; }
+        .nav-links a:not(.btn-navbar):hover { color: #007bff; }
+        .welcome-message { color: #555; font-weight: 500; margin-right: 15px; white-space: nowrap; }
+        .btn-navbar { display: inline-block; padding: 8px 18px; border-radius: 8px; font-weight: bold; font-size: 0.95em; text-align: center; text-decoration: none; transition: background-color 0.2s ease, opacity 0.2s ease; color: #fff; border: none; }
+        .btn-navbar.dashboard { background-color: #4a90e2; }
+        .btn-navbar.logout { background-color: #e04444; }
+        .btn-navbar:hover { opacity: 0.9; }
+        .main-footer { background-color: #333; color: #fff; text-align: center; padding: 25px 0; font-size: 0.9em; margin-top: auto; width: 100%; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
     </style>
 </head>
 <body>
@@ -362,13 +330,10 @@ $conn->close(); // Close database connection after all operations
                     <li><a href="../contact.php">Contact</a></li>
                     
                     <?php
-                    // Dynamic links for logged-in organizer (reused from dashboard logic)
-                    // Note: Since this page is protected, we are always logged in here as an organizer.
-                    $dashboard_link = 'dashboard.php'; // Path to organizer dashboard from current location
-
+                    $dashboard_link = 'dashboard.php';
                     echo '<li class="welcome-message">Welcome, ' . htmlspecialchars($_SESSION["user_name"]) . '</li>';
-                    echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn btn-primary">Dashboard</a></li>';
-                    echo '<li><a href="../logout.php" class="btn btn-primary" style="background-color: #dc3545;">Logout</a></li>'; 
+                    echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn-navbar dashboard">Dashboard</a></li>';
+                    echo '<li><a href="../logout.php" class="btn-navbar logout">Logout</a></li>'; 
                     ?>
                 </ul>
             </nav>
@@ -380,16 +345,15 @@ $conn->close(); // Close database connection after all operations
             <h2>Edit Event</h2>
             
             <?php 
-            // Display message if set
             if (!empty($message)) {
                 echo $message;
             }
             ?>
 
-            <?php if ($event_id !== null): // 4. Show an editable form only if a valid event was loaded ?>
-                <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post">
-                    <!-- Hidden field to pass event ID during POST submission -->
+            <?php if ($event_id !== null): /* Only show form if a valid event was loaded */ ?>
+                <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>?event_id=<?php echo htmlspecialchars($event_id); ?>" method="post" enctype="multipart/form-data">
                     <input type="hidden" name="event_id" value="<?php echo htmlspecialchars($event_id); ?>">
+                    <input type="hidden" name="current_image_path" value="<?php echo htmlspecialchars($current_image_path); ?>">
 
                     <div class="form-group">
                         <label for="event_title">Event Title:</label>
@@ -419,6 +383,20 @@ $conn->close(); // Close database connection after all operations
                             <option value="Tech" <?php echo ($category == 'Tech') ? 'selected' : ''; ?>>Tech</option>
                             <option value="Community" <?php echo ($category == 'Community') ? 'selected' : ''; ?>>Community</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="total_tickets">Total Tickets Available:</label>
+                        <input type="number" id="total_tickets" name="total_tickets" min="1" value="<?php echo htmlspecialchars($total_tickets); ?>" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Current Event Image:</label>
+                        <?php 
+                        // Display current image preview
+                        $current_img_src = !empty($current_image_path) ? htmlspecialchars($current_image_path) : 'event-images/default.jpg';
+                        ?>
+                        <img src="../<?php echo $current_img_src; ?>" alt="Current Event Image" class="current-image-preview">
+                        <label for="event_image" style="margin-top: 15px;">Change Event Image (.jpg, .jpeg, .png, .webp, max 2MB):</label>
+                        <input type="file" id="event_image" name="event_image" accept=".jpg, .jpeg, .png, .webp">
                     </div>
                     <div class="form-group">
                         <button type="submit" class="btn-submit">Update Event</button>

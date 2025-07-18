@@ -14,7 +14,7 @@ $search_term = trim($_GET['search'] ?? '');
 $category_filter = trim($_GET['category'] ?? '');
 $location_filter = trim($_GET['location'] ?? '');
 $month_filter = trim($_GET['month'] ?? '');       
-$date_filter = trim($_GET['date'] ?? ''); // Retain for backend logic if present in form
+$date_filter = trim($_GET['date'] ?? ''); 
 
 // Build the SQL query dynamically based on filters (PHP LOGIC - UNTOUCHED)
 $conditions = ["e.status = 'approved'"]; 
@@ -54,6 +54,7 @@ if (!empty($date_filter)) {
 
 $where_clause = implode(" AND ", $conditions);
 
+// MODIFIED SQL QUERY: ADDED e.image_path
 $sql = "SELECT 
             e.id,           
             e.title, 
@@ -64,7 +65,8 @@ $sql = "SELECT
             e.category, 
             e.total_tickets, 
             e.tickets_booked,
-            o.name AS organizer_name 
+            o.name AS organizer_name,
+            e.image_path /* ADDED: Select image_path */
         FROM 
             events e
         JOIN 
@@ -374,6 +376,7 @@ $conn->close();
             transform: translateY(-2px); 
         }
 
+        /* MODIFIED CSS: Event Logo with background image */
         .event-logo {
             flex-shrink: 0; 
             width: 50px; 
@@ -383,10 +386,21 @@ $conn->close();
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.2em;
-            color: var(--light-text-color);
+            font-size: 1.2em; /* Fallback icon size */
+            color: var(--light-text-color); /* Fallback icon color */
             border: 1px solid var(--border-color);
+            
+            background-size: cover; /* Ensure image covers the div */
+            background-position: center; /* Center the image */
+            background-repeat: no-repeat; /* Do not repeat */
+            /* If you want to retain an icon *over* the image, use position: relative and i { position: absolute; ... } */
         }
+        /* If you comment out the icon in HTML, no need for the icon styling below */
+        /* .event-logo i {
+            position: relative; 
+            z-index: 1; 
+        } */
+
 
         .event-content-main {
             flex-grow: 1;
@@ -502,7 +516,7 @@ $conn->close();
             }
             /* Adjust navbar for smaller screens if needed, otherwise default browser behavior */
             .main-nav {
-                flex-direction: column; /* Stack logo and links */
+                flex-direction: column; 
                 gap: 10px;
                 align-items: flex-start;
             }
@@ -515,12 +529,12 @@ $conn->close();
                 margin-left: 0;
             }
             .welcome-message {
-                margin-right: 0; /* Adjust spacing */
-                width: 100%; /* Take full width */
+                margin-right: 0; 
+                width: 100%; 
                 text-align: center;
             }
             .btn-navbar.dashboard, .btn-navbar.logout {
-                 margin-left: 0; /* Remove specific margin for stacking */
+                 margin-left: 0; 
             }
         }
         @media (max-width: 768px) {
@@ -581,7 +595,7 @@ $conn->close();
                         echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn-navbar dashboard">Dashboard</a></li>';
                         echo '<li><a href="logout.php" class="btn-navbar logout">Logout</a></li>'; 
                     } else {
-                        echo '<li><a href="auth.php" class="btn-navbar dashboard">Login/Register</a></li>'; // Reusing dashboard button style for Login/Register
+                        echo '<li><a href="auth.php" class="btn-navbar dashboard">Login/Register</a></li>'; 
                     }
                     ?>
                 </ul>
@@ -654,11 +668,14 @@ $conn->close();
                         <?php foreach ($events as $event): 
                             $tickets_remaining = $event['total_tickets'] - $event['tickets_booked'];
                             $is_sold_out = ($tickets_remaining <= 0);
+                            // Determine image path for list item
+                            $image_src_list = !empty($event['image_path']) ? htmlspecialchars($event['image_path']) : 'event-images/default.jpg';
                         ?>
                             <!-- Link entire event item -->
                             <a href="event-details.php?event_id=<?php echo htmlspecialchars($event['id']); ?>" class="event-list-item">
-                                <div class="event-logo">
-                                    <i class="fa-solid fa-building-columns"></i> <!-- Placeholder icon -->
+                                <!-- MODIFIED HTML: Set background image for .event-logo -->
+                                <div class="event-logo" style="background-image: url('<?php echo $image_src_list; ?>');">
+                                    <!-- Removed placeholder icon as image will now display -->
                                 </div>
                                 <div class="event-content-main">
                                     <h3><?php echo htmlspecialchars($event['title']); ?></h3>

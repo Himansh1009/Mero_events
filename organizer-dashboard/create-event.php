@@ -13,8 +13,15 @@ require_once '../includes/config.php';
 
 // Initialize variables for form data and messages
 $event_title = $description = $event_date = $event_time = $location = $category = "";
-$total_tickets = ""; // New field initialization
+$total_tickets = ""; 
 $message = "";
+
+// Directory for event image uploads (relative to project root from create-event.php)
+$upload_dir = '../event-images/'; 
+if (!is_dir($upload_dir)) {
+    mkdir($upload_dir, 0777, true); // Create directory if it doesn't exist, with full permissions
+}
+$default_image_path = 'event-images/default.jpg'; // Path to store in DB if no upload
 
 // Get the organizer's ID from the session (guaranteed to be set by session-organizer.php)
 $organizer_id = $_SESSION["user_id"];
@@ -29,60 +36,103 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $event_time = trim($_POST["event_time"]);
     $location = trim($_POST["location"]);
     $category = trim($_POST["category"]);
-    $total_tickets = trim($_POST["total_tickets"]); // Get new field value
+    $total_tickets = trim($_POST["total_tickets"]);
 
-    // Validate inputs (all fields required, tickets >= 1)
+    // Start with default image path; it will be updated if an image is successfully uploaded
+    $event_image_path_for_db = $default_image_path; 
+    $upload_error = false; // Flag to track upload-specific errors
+
+    // 1. Validate inputs (all fields required, tickets >= 1)
     if (empty($event_title) || empty($description) || empty($event_date) || empty($event_time) || empty($location) || empty($category) || empty($total_tickets)) {
         $message = "<div class='error-msg'>All fields are required.</div>";
     } elseif (!is_numeric($total_tickets) || $total_tickets < 1) {
         $message = "<div class='error-msg'>Total Tickets Available must be a positive number.</div>";
     } else {
-        // Insert into `events` table
-        // `tickets_booked` defaults to 0, `status` defaults to 'pending'
-        $sql = "INSERT INTO events (title, description, event_date, event_time, location, category, total_tickets, tickets_booked, organizer_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'pending')";
+        // Handle image upload if a file was selected
+        if (isset($_FILES['event_image']) && $_FILES['event_image']['error'] == UPLOAD_ERR_OK) {
+            $file_name = $_FILES['event_image']['name'];
+            $file_tmp_name = $_FILES['event_image']['tmp_name'];
+            $file_size = $_FILES['event_image']['size'];
+            
+            $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
 
-        if ($stmt = $conn->prepare($sql)) {
-            // Bind parameters
-            // s: string, i: integer (for total_tickets and organizer_id)
-            $stmt->bind_param(
-                "ssssssii", // 6 strings (title, desc, date, time, loc, category), 1 integer (total_tickets), 1 integer (organizer_id)
-                $param_title,
-                $param_description,
-                $param_event_date,
-                $param_event_time,
-                $param_location,
-                $param_category,
-                $param_total_tickets, // New parameter
-                $param_organizer_id
-            );
+            // Validate the file type and size (e.g., max 2MB).
+            $allowed_extensions = array("jpg", "jpeg", "png", "webp");
+            $max_file_size = 2 * 1024 * 1024; // 2 MB in bytes
 
-            // Set parameter values
-            $param_title = $event_title;
-            $param_description = $description;
-            $param_event_date = $event_date;
-            $param_event_time = $event_time;
-            $param_location = $location;
-            $param_category = $category;
-            $param_total_tickets = $total_tickets; // Assign new parameter
-            $param_organizer_id = $organizer_id; // Retrieved from session
-
-            // Attempt to execute the prepared statement
-            if ($stmt->execute()) {
-                // Show success message
-                $message = "<div class='success-msg'>Event submitted successfully and is pending admin approval.</div>";
-                
-                // Clear form fields after successful submission (since we don't redirect)
-                $event_title = $description = $event_date = $event_time = $location = $category = "";
-                $total_tickets = ""; // Clear new field as well
+            if (!in_array($file_ext, $allowed_extensions)) {
+                $message = "<div class='error-msg'>Invalid image file type. Only JPG, JPEG, PNG, WEBP are allowed.</div>";
+                $upload_error = true;
+            } elseif ($file_size > $max_file_size) {
+                $message = "<div class='error-msg'>Image file is too large (max 2MB).</div>";
+                $upload_error = true;
             } else {
-                // Show error message
-                $message = "<div class='error-msg'>Error: Could not create event. " . $stmt->error . "</div>";
-            }
+                // Store the image in a folder named event-images/
+                $new_file_name = uniqid('event_img_', true) . '.' . $file_ext;
+                $destination = $upload_dir . $new_file_name; // Full server path
+                $event_image_path_for_db = 'event-images/' . $new_file_name; // Path relative to project root for DB
 
-            // Close statement
-            $stmt->close();
-        } else {
-            $message = "<div class='error-msg'>Database error: Could not prepare statement for event insertion.</div>";
+                if (!move_uploaded_file($file_tmp_name, $destination)) {
+                    $message = "<div class='error-msg'>Failed to upload event image. Please check directory permissions.</div>";
+                    $upload_error = true;
+                }
+            }
+        } elseif (isset($_FILES['event_image']) && $_FILES['event_image']['error'] != UPLOAD_ERR_NO_FILE) {
+            // Handle other potential upload errors (e.g., UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE)
+            $message = "<div class='error-msg'>An upload error occurred: Code " . $_FILES['event_image']['error'] . "</div>";
+            $upload_error = true;
+        }
+        
+        // Only proceed to insert into DB if no validation errors and no upload errors
+        if (empty($message) && !$upload_error) {
+            // Insert into `events` table
+            // `tickets_booked` defaults to 0, `status` defaults to 'pending'
+            $sql = "INSERT INTO events (title, description, event_date, event_time, location, category, total_tickets, tickets_booked, organizer_id, status, image_path) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'pending', ?)";
+
+            if ($stmt = $conn->prepare($sql)) {
+                // Bind parameters: 6 strings (basic fields), 1 int (total_tickets), 1 int (organizer_id), 1 string (image_path)
+                $stmt->bind_param(
+                    "ssssssiis", 
+                    $param_title,
+                    $param_description,
+                    $param_event_date,
+                    $param_event_time,
+                    $param_location,
+                    $param_category,
+                    $param_total_tickets, 
+                    $param_organizer_id,
+                    $param_image_path // New parameter for image path
+                );
+
+                // Set parameter values
+                $param_title = $event_title;
+                $param_description = $description;
+                $param_event_date = $event_date;
+                $param_event_time = $event_time;
+                $param_location = $location;
+                $param_category = $category;
+                $param_total_tickets = $total_tickets; 
+                $param_organizer_id = $organizer_id; 
+                $param_image_path = $event_image_path_for_db; // Store the image path
+
+                // Attempt to execute the prepared statement
+                if ($stmt->execute()) {
+                    // Show success message
+                    $message = "<div class='success-msg'>Event submitted successfully and is pending admin approval.</div>";
+                    
+                    // Clear form fields after successful submission
+                    $event_title = $description = $event_date = $event_time = $location = $category = "";
+                    $total_tickets = ""; 
+                } else {
+                    // Show error message
+                    $message = "<div class='error-msg'>Error: Could not create event. " . $stmt->error . "</div>";
+                }
+
+                // Close statement
+                $stmt->close();
+            } else {
+                $message = "<div class='error-msg'>Database error: Could not prepare statement for event insertion.</div>";
+            }
         }
     }
     // Close database connection after all operations for this POST request
@@ -99,36 +149,58 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <!-- Link to your main CSS file -->
     <link rel="stylesheet" href="../assets/css/style.css"> 
     <style>
-        /* Basic styling to center the form in a card/box */
+        /* Define Color Palette for this page's specific elements/overrides */
+        :root {
+            --primary-color: #ff6b6b;   /* Reddish-orange */
+            --secondary-color: #1dd1a1; /* Teal green */
+            --accent-color: #feca57;    /* Yellow-orange */
+            --background-color: #f1f2f6;
+            --text-color: #2f3542;      /* Dark text */
+            --light-text-color: #666666; /* Lighter gray for secondary text */
+            --white: #ffffff;
+            --border-color: #ddd;
+            --shadow-color: rgba(0,0,0,0.05);
+
+            /* Navbar specific colors (from previous prompt's image) */
+            --navbar-bg: #ffffff;
+            --navbar-border: #f0f0f0; 
+            --navbar-logo-color: #2f3542; 
+            --navbar-link-color: #666666; 
+            --navbar-dashboard-btn-bg: #4a90e2; 
+            --navbar-logout-btn-bg: #e04444; 
+            --navbar-btn-text-color: #ffffff; 
+        }
+
+        /* Basic styling to center the form in a card/box (from previous common styles) */
         body {
             font-family: Arial, sans-serif;
-            background-color: #f4f7f6;
+            background-color: var(--background-color); /* Use variable */
             margin: 0;
             display: flex;
             flex-direction: column;
-            min-height: 100vh; /* Ensures footer stays at bottom */
+            min-height: 100vh;
         }
         main {
-            flex-grow: 1; /* Allows main content to fill available space */
+            flex-grow: 1;
             padding: 40px 20px;
             display: flex;
             justify-content: center;
-            align-items: center; /* Vertically center the content */
+            align-items: center;
         }
 
         .event-form-container {
-            background-color: #fff;
+            background-color: var(--white); /* Use variable */
             padding: 40px;
             border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 10px var(--shadow-color); /* Use variable */
             width: 100%;
-            max-width: 600px; /* Wider form for more content */
-            margin: auto; /* Center the container */
+            max-width: 600px;
+            margin: auto;
         }
 
         .event-form-container h2 {
             text-align: center;
-            color: #333;
+            color: var(--text-color); /* Use variable */
             margin-bottom: 30px;
             font-size: 2em;
         }
@@ -141,42 +213,44 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         .form-group label {
             display: block;
             margin-bottom: 8px;
-            color: #555;
+            color: var(--text-color); /* Use variable */
             font-weight: bold;
         }
 
         .form-group input[type="text"],
         .form-group input[type="date"],
         .form-group input[type="time"],
-        .form-group input[type="number"], /* Added for total_tickets */
+        .form-group input[type="number"],
         .form-group select,
-        .form-group textarea {
+        .form-group textarea,
+        .form-group input[type="file"] { /* Style for file input */
             width: 100%;
             padding: 12px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-color); /* Use variable */
             border-radius: 5px;
             font-size: 1em;
-            box-sizing: border-box; /* Ensures padding doesn't increase width */
+            box-sizing: border-box;
+            background-color: var(--background-color); /* Light background for inputs */
+            color: var(--text-color); /* Use variable for input text color */
         }
-
         .form-group textarea {
-            resize: vertical; /* Allow vertical resizing for description */
-            min-height: 120px; /* Minimum height for textarea */
+            resize: vertical;
+            min-height: 120px;
         }
-
         .form-group input:focus,
         .form-group select:focus,
-        .form-group textarea:focus {
-            border-color: #007bff;
+        .form-group textarea:focus,
+        .form-group input[type="file"]:focus {
+            border-color: var(--accent-color); /* Use accent color on focus */
             outline: none;
-            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+            box-shadow: 0 0 0 3px rgba(254,202,87,0.25); /* Accent shadow */
         }
 
         .btn-submit {
             width: 100%;
             padding: 12px;
-            background-color: #28a745; /* A pleasant green for 'create' action */
-            color: #fff;
+            background-color: var(--secondary-color); /* Green from palette */
+            color: var(--white);
             border: none;
             border-radius: 5px;
             font-size: 1.1em;
@@ -184,12 +258,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             cursor: pointer;
             transition: background-color 0.3s ease;
         }
-
         .btn-submit:hover {
-            background-color: #218838;
+            background-color: #17b38c; /* Darker secondary on hover */
         }
 
-        /* Message styling */
+        /* Message styling (reusing from common styles) */
         .message {
             margin-bottom: 20px;
             padding: 12px;
@@ -197,114 +270,48 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             text-align: center;
             font-weight: bold;
         }
-
-        .success-msg {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .error-msg {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        /* Header/Footer styles (consistent with other pages) */
+        .success-msg { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error-msg { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        
+        /* Header/Footer styles (consistent with other pages, using variables) */
         .main-header {
-            background-color: #fff;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            background-color: var(--navbar-bg);
+            box-shadow: 0 2px 5px var(--shadow-color);
+            border-bottom: 1px solid var(--navbar-border);
             padding: 15px 0;
         }
-
-        .main-nav {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .site-logo {
-            font-size: 1.8em;
-            font-weight: bold;
-            color: #333;
-            margin-right: 20px;
-            text-decoration: none;
-        }
-
-        .site-logo:hover {
-            color: #007bff;
-        }
-
-        .nav-links {
-            list-style: none;
-            display: flex;
-            align-items: center;
-            margin: 0;
-            padding: 0;
-        }
-
-        .nav-links li {
-            margin-left: 25px;
-        }
-
-        .nav-links a {
-            color: #555;
-            font-weight: 500;
-            padding: 5px 0;
-            transition: color 0.3s ease;
-            text-decoration: none;
-        }
-
-        .nav-links a:not(.btn):hover {
-            color: #007bff;
-        }
-
-        .welcome-message {
-            color: #555;
-            font-weight: 500;
-            margin-right: 15px;
-            white-space: nowrap;
-        }
+        .main-nav { display: flex; justify-content: space-between; align-items: center; }
+        .site-logo { font-size: 1.8em; font-weight: bold; color: var(--navbar-logo-color); margin-right: 20px; text-decoration: none; }
+        .site-logo:hover { color: var(--primary-color); } /* Keep primary hover as per general theme */
+        .nav-links { list-style: none; display: flex; align-items: center; margin: 0; padding: 0; }
+        .nav-links li { margin-left: 25px; }
+        .nav-links a { color: var(--navbar-link-color); font-weight: 500; padding: 5px 0; transition: color 0.3s ease; text-decoration: none; }
+        .nav-links a:not(.btn-navbar):hover { color: var(--navbar-logo-color); }
+        .welcome-message { color: var(--navbar-link-color); font-weight: 500; margin-right: 15px; white-space: nowrap; }
         
-        .btn { /* Basic button style from style.css */
+        .btn-navbar {
             display: inline-block;
-            padding: 10px 20px;
-            border-radius: 5px;
+            padding: 8px 18px; 
+            border-radius: 8px; 
             font-weight: bold;
+            font-size: 0.95em; 
             text-align: center;
-            transition: background-color 0.3s ease;
             text-decoration: none;
+            transition: background-color 0.2s ease, opacity 0.2s ease;
+            color: var(--navbar-btn-text-color); 
+            border: none;
         }
-
-        .btn-primary {
-            background-color: #007bff;
-            color: #fff;
-            border: 1px solid #007bff;
-        }
-
-        .btn-primary:hover {
-            background-color: #0056b3;
-            border-color: #0056b3;
-        }
-
-        .btn-secondary {
-            background-color: #28a745;
-            color: #fff;
-            border: 1px solid #28a745;
-        }
-
-        .btn-secondary:hover {
-            background-color: #218838;
-            border-color: #1e7e34;
-        }
+        .btn-navbar.dashboard { background-color: var(--navbar-dashboard-btn-bg); }
+        .btn-navbar.logout { background-color: var(--navbar-logout-btn-bg); }
+        .btn-navbar:hover { opacity: 0.9; }
 
         .main-footer {
-            background-color: #333;
-            color: #fff;
+            background-color: var(--text-color); /* Assuming footer is dark as per theme */
+            color: var(--white);
             text-align: center;
             padding: 25px 0;
             font-size: 0.9em;
-            margin-top: auto; /* Push footer to the bottom */
+            margin-top: auto; 
             width: 100%;
         }
         .container {
@@ -331,8 +338,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $dashboard_link = 'dashboard.php'; // Path to organizer dashboard from current location
 
                     echo '<li class="welcome-message">Welcome, ' . htmlspecialchars($_SESSION["user_name"]) . '</li>';
-                    echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn btn-primary">Dashboard</a></li>';
-                    echo '<li><a href="../logout.php" class="btn btn-primary" style="background-color: #dc3545;">Logout</a></li>'; 
+                    echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn-navbar dashboard">Dashboard</a></li>';
+                    echo '<li><a href="../logout.php" class="btn-navbar logout">Logout</a></li>'; 
                     ?>
                 </ul>
             </nav>
@@ -350,7 +357,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
             ?>
 
-            <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post">
+            <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post" enctype="multipart/form-data">
                 <div class="form-group">
                     <label for="event_title">Event Title:</label>
                     <input type="text" id="event_title" name="event_title" value="<?php echo htmlspecialchars($event_title); ?>" required>
@@ -383,6 +390,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 <div class="form-group">
                     <label for="total_tickets">Total Tickets Available:</label>
                     <input type="number" id="total_tickets" name="total_tickets" min="1" value="<?php echo htmlspecialchars($total_tickets); ?>" required>
+                </div>
+                <div class="form-group">
+                    <label for="event_image">Upload Event Image (.jpg, .jpeg, .png, .webp, max 2MB):</label>
+                    <input type="file" id="event_image" name="event_image" accept=".jpg, .jpeg, .png, .webp">
                 </div>
                 <div class="form-group">
                     <button type="submit" class="btn-submit">Create Event</button>

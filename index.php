@@ -16,7 +16,8 @@ $sql_featured = "SELECT
                     e.event_date, 
                     e.location,
                     e.tickets_booked,
-                    e.total_tickets
+                    e.total_tickets,
+                    e.image_path /* ADDED: Select the image_path */
                  FROM 
                     events e
                  WHERE 
@@ -46,7 +47,7 @@ $conn->close(); // Close the database connection after fetching events
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mero Events - Discover Amazing Events Near You!</title>
-    <!-- Include Font Awesome for icons (emojis in image are actual emojis, but icons could be used) -->
+    <!-- Include Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <!-- Link to your main CSS file (assets/css/style.css) if you have global styles there -->
     <link rel="stylesheet" href="assets/css/style.css">
@@ -328,7 +329,7 @@ $conn->close(); // Close the database connection after fetching events
         .info-msg { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
         .error-msg { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
 
-        /* --- Footer (FROM includes/footer.php - embedded for self-contained example) --- */
+        /* --- Footer (Embedded for self-contained example, will be include in real project) --- */
         /* Assuming this content will eventually be loaded from includes/footer.php */
         .main-footer {
             background-color: #2f3542; /* Dark background, matching project's text-color */
@@ -581,7 +582,7 @@ $conn->close(); // Close the database connection after fetching events
             <a href="index.php" class="site-logo">Mero Events</a>
             <ul class="nav-links">
                 <li><a href="index.php">Home</a></li>
-                <li><a href="events.php">Events</a></li>
+                <li><a href="events.php">Browse Events</a></li>
                 <li><a href="about.php">About</a></li>
                 <li><a href="contact.php">Contact</a></li>
                 
@@ -623,19 +624,11 @@ $conn->close(); // Close the database connection after fetching events
             <?php if (!empty($featured_events)): ?>
                 <div class="featured-cards-grid">
                     <?php foreach ($featured_events as $event): 
-                        // You can use a placeholder image or add image_path to events table
-                        $image_placeholder = 'https://via.placeholder.com/400x180/8a2be2/ffffff?text=Event+Image'; // Example placeholder
-                        // For different images, you could use a switch or conditional based on category, or just random
-                        if ($event['category'] == 'Education') {
-                            $image_placeholder = 'https://via.placeholder.com/400x180/007bff/ffffff?text=Education+Event';
-                        } elseif ($event['category'] == 'Tech') {
-                            $image_placeholder = 'https://via.placeholder.com/400x180/1dd1a1/ffffff?text=Tech+Event';
-                        } elseif ($event['category'] == 'Community') {
-                             $image_placeholder = 'https://via.placeholder.com/400x180/ff6b6b/ffffff?text=Community+Event';
-                        }
+                        // Determine image path (use default if empty/invalid)
+                        $image_src = !empty($event['image_path']) ? htmlspecialchars($event['image_path']) : 'event-images/default.jpg';
                     ?>
                         <a href="event-details.php?event_id=<?php echo htmlspecialchars($event['id']); ?>" class="featured-card">
-                            <img src="<?php echo $image_placeholder; ?>" alt="<?php echo htmlspecialchars($event['title']); ?>" class="featured-card-image">
+                            <img src="<?php echo $image_src; ?>" alt="<?php echo htmlspecialchars($event['title']); ?>" class="featured-card-image">
                             <div class="featured-card-content">
                                 <h3><?php echo htmlspecialchars($event['title']); ?></h3>
                                 <p class="featured-card-meta">
@@ -657,46 +650,7 @@ $conn->close(); // Close the database connection after fetching events
         </section>
     </main>
 
-    <!-- FOOTER SECTION -->
-     <?php require_once 'includes/footer.php'; ?> 
-    <!-- <footer class="main-footer">
-        <div class="footer-content">
-            <div class="footer-column">
-                <h3>Quick Links</h3>
-                <ul>
-                    <li><a href="index.php">Home</a></li>
-                    <li><a href="browse-events.php">Browse Events</a></li>
-                    <li><a href="about.php">About Us</a></li>
-                    <li><a href="contact.php">Contact</a></li>
-                </ul>
-            </div>
-
-            <div class="footer-column">
-                <h3>Contact Us</h3>
-                <div class="contact-info">
-                    <p><i class="fa-solid fa-envelope"></i> <a href="mailto:info@meroevents.com">info@meroevents.com</a></p>
-                    <p><i class="fa-solid fa-phone"></i> +977 9841000000</p>
-                    <p><i class="fa-solid fa-location-dot"></i> Bharatpur, Nepal</p>
-                </div>
-            </div>
-
-            <div class="footer-column">
-                <h3>Stay Updated</h3>
-                <form action="#" method="post" class="subscribe-form">
-                    <input type="email" name="email" placeholder="Your Email" required>
-                    <button type="submit">Subscribe</button>
-                </form>
-                <p class="subscribe-text">Get notified about upcoming events and Mero Events news!</p>
-            </div>
-        </div>
-
-        <div class="footer-bottom">
-            <p>© 2023 Mero Events. All rights reserved.</p>
-            <p><a href="#top">Back to Top</a></p>
-            <div class="scroll-to-top-button" onclick="window.scrollTo({ top: 0, behavior: 'smooth' });">
-                <i class="fa-solid fa-magnifying-glass"></i>
-            </div>
-        </div>
-    </footer> -->
+    <!-- FOOTER SECTION (Included from includes/footer.php) -->
+    <?php require_once 'includes/footer.php'; ?> 
 </body>
 </html>
