@@ -1,6 +1,11 @@
 <?php
 session_start(); // Start the session to access $_SESSION variables
 
+// Enable full error reporting for debugging, especially important for 500 errors
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 // Use includes/config.php for DB connection.
 require_once 'includes/config.php';
 
@@ -19,7 +24,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])
     $booking_event_id = trim($_POST['event_id']);
     $num_tickets_requested = trim($_POST['num_tickets']);
 
-    // Keep the event_id for re-fetching and sticky form fields after POST
+    // Ensure event_id_to_fetch is set from POST for subsequent re-fetch
     $event_id_to_fetch = $booking_event_id;
 
     // Validate initial inputs
@@ -33,7 +38,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])
 
         try {
             // Prevent duplicate booking (user should only book once per event).
-            $sql_check_duplicate = "SELECT id FROM ticket_bookings WHERE user_id = ? AND event_id = ? FOR UPDATE";
+            // Check ticket_bookings table if user_id and event_id already exist and the booking is not cancelled.
+            $sql_check_duplicate = "SELECT id FROM ticket_bookings WHERE user_id = ? AND event_id = ? AND status != 'cancelled' FOR UPDATE";
             if ($stmt_duplicate = $conn->prepare($sql_check_duplicate)) {
                 $stmt_duplicate->bind_param("ii", $user_id, $booking_event_id);
                 $stmt_duplicate->execute();
@@ -58,17 +64,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])
                 }
                 
                 $row_tickets = $result_check->fetch_assoc();
-                $current_tickets_booked = $row_tickets['tickets_booked'];
+                $current_tickets_booked_count = $row_tickets['tickets_booked']; 
                 $total_tickets_available = $row_tickets['total_tickets'];
-                $remaining_tickets = $total_tickets_available - $current_tickets_booked;
+                $remaining_tickets = $total_tickets_available - $current_tickets_booked_count;
 
                 if ($num_tickets_requested > $remaining_tickets) {
                     throw new Exception("Not enough tickets available. Only " . $remaining_tickets . " ticket(s) remaining.");
                 }
                 $stmt_check->close();
 
-                // Insert booking into ticket_bookings table
-                $sql_insert_booking = "INSERT INTO ticket_bookings (user_id, event_id, tickets_booked) VALUES (?, ?, ?)";
+                // CORRECTED INSERT INTO ticket_bookings: using num_tickets column
+                $sql_insert_booking = "INSERT INTO ticket_bookings (user_id, event_id, num_tickets, status) VALUES (?, ?, ?, 'booked')";
                 if ($stmt_insert = $conn->prepare($sql_insert_booking)) {
                     $stmt_insert->bind_param("iii", $user_id, $booking_event_id, $num_tickets_requested);
                     if (!$stmt_insert->execute()) {
@@ -94,7 +100,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])
                 $conn->commit(); // Commit the transaction
                 $message = "<div class='success-msg'>Successfully booked " . htmlspecialchars($num_tickets_requested) . " ticket(s)!</div>";
                 
-                $has_booked_already = true; 
+                $has_booked_already = true; // Set flag for current display
 
             } else {
                 throw new Exception("Database error checking tickets availability: " . $conn->error);
@@ -107,11 +113,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets_submit'])
 }
 
 
-// --- Event Fetch Logic (GET request for initial load OR after POST) ---
-// Get event_id via GET parameter
-if (isset($_GET['event_id']) && is_numeric($_GET['event_id'])) {
+// --- Event Fetch Logic (GET request for initial load OR after booking attempt) ---
+// Prefer POST ID if a POST just happened, otherwise use GET ID from URL
+if (isset($_POST['event_id']) && is_numeric($_POST['event_id'])) {
+    $event_id_to_fetch = $_POST['event_id'];
+} elseif (isset($_GET['event_id']) && is_numeric($_GET['event_id'])) {
     $event_id_to_fetch = $_GET['event_id']; 
 }
+
 
 if ($event_id_to_fetch !== null) {
     // Fetch full event details from events table, joining organizers table to get organizer name.
@@ -127,7 +136,7 @@ if ($event_id_to_fetch !== null) {
                 e.total_tickets,    
                 e.tickets_booked,   
                 o.name AS organizer_name,
-                e.image_path /* ADDED: Select image_path */
+                e.image_path 
             FROM 
                 events e
             JOIN 
@@ -142,9 +151,10 @@ if ($event_id_to_fetch !== null) {
             if ($result->num_rows == 1) {
                 $event = $result->fetch_assoc();
 
-                // After fetching the event, if user is logged in, check for existing booking for DISPLAY
+                // After fetching the event, if user is logged in, check for active booking for DISPLAY
+                // Only re-check if not already set to true by a successful POST
                 if ($is_logged_in_user && !$has_booked_already) { 
-                    $sql_check_existing_booking = "SELECT id FROM ticket_bookings WHERE user_id = ? AND event_id = ?";
+                    $sql_check_existing_booking = "SELECT id FROM ticket_bookings WHERE user_id = ? AND event_id = ? AND status != 'cancelled'"; 
                     if ($stmt_existing_booking = $conn->prepare($sql_check_existing_booking)) {
                         $stmt_existing_booking->bind_param("ii", $user_id, $event['id']);
                         $stmt_existing_booking->execute();
@@ -154,7 +164,7 @@ if ($event_id_to_fetch !== null) {
                         }
                         $stmt_existing_booking->close();
                     } else {
-                        error_log("Database error checking existing booking: " . $conn->error);
+                        error_log("Database error checking existing booking for display: " . $conn->error);
                     }
                 }
 
@@ -172,7 +182,7 @@ if ($event_id_to_fetch !== null) {
     $message = "<div class='error-msg'>No event ID provided or invalid ID.</div>";
 }
 
-$conn->close(); // Close the database connection
+$conn->close(); 
 ?>
 
 <!DOCTYPE html>
@@ -181,11 +191,10 @@ $conn->close(); // Close the database connection
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Event Details - Mero Events</title>
-    <!-- Include Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
-        /* Define Color Palette for consistency */
+        /* CSS variables and styles as per previous event-details.php */
         :root {
             --primary-color: #ff6b6b;   /* Reddish-orange */
             --secondary-color: #1dd1a1; /* Teal green */
@@ -197,15 +206,23 @@ $conn->close(); // Close the database connection
             --border-color: #ddd;
             --shadow-color: rgba(0,0,0,0.05);
             --hover-shadow-color: rgba(0,0,0,0.1);
-
-            /* Navbar specific colors (from previous prompt's image) */
             --navbar-bg: #ffffff;
             --navbar-border: #f0f0f0; 
-            --navbar-logo-color: #6A5ACD; /* Blue-purple from image */
+            --navbar-logo-color: #6A5ACD; 
             --navbar-link-color: #666666; 
             --navbar-dashboard-btn-bg: #4a90e2; 
             --navbar-logout-btn-bg: #e04444; 
             --navbar-btn-text-color: #ffffff; 
+            --hero-gradient-start: #6a5acd; 
+            --hero-gradient-end: #4a90e2; 
+            --hero-text-color: var(--white);
+            --explore-btn-bg: var(--white);
+            --explore-btn-text: #6a5acd; 
+            --card-bg: var(--white);
+            --card-shadow: rgba(0,0,0,0.08);
+            --card-title-color: #2f3542; 
+            --card-meta-color: #666;
+            --card-meta-icon-color: #bbbbbb; 
         }
 
         body {
@@ -233,7 +250,6 @@ $conn->close(); // Close the database connection
             text-align: left;
         }
 
-        /* ADDED/MODIFIED CSS FOR EVENT IMAGE ON DETAILS PAGE */
         .event-details-image {
             width: 100%;
             max-height: 350px; 
@@ -257,7 +273,7 @@ $conn->close(); // Close the database connection
             display: block; 
         }
         .event-details-container .organizer-name strong {
-            color: var(--navbar-dashboard-btn-bg); /* Use a consistent blue */
+            color: var(--navbar-dashboard-btn-bg); 
         }
 
         .event-details-container p {
@@ -309,7 +325,7 @@ $conn->close(); // Close the database connection
 
         /* Ticket Booking Section */
         .booking-section {
-            background-color: var(--background-color); /* Lighter background for this section */
+            background-color: var(--background-color);
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 30px;
@@ -324,13 +340,13 @@ $conn->close(); // Close the database connection
         .booking-section .tickets-remaining {
             font-size: 1.2em;
             font-weight: bold;
-            color: var(--secondary-color); /* Green for available */
+            color: var(--secondary-color);
             margin-bottom: 20px;
         }
         .booking-section .tickets-sold-out {
             font-size: 1.2em;
             font-weight: bold;
-            color: var(--primary-color); /* Red for sold out */
+            color: var(--primary-color);
             margin-bottom: 20px;
         }
         .booking-section .form-group {
@@ -345,7 +361,7 @@ $conn->close(); // Close the database connection
             border-radius: 5px;
             font-size: 1em;
             box-sizing: border-box;
-            background-color: var(--white); /* White input background */
+            background-color: var(--white);
             color: var(--text-color);
         }
         .booking-section input[type="number"]:focus {
@@ -353,7 +369,7 @@ $conn->close(); // Close the database connection
             box-shadow: 0 0 0 3px rgba(254,202,87,0.25);
         }
         .booking-section button {
-            background-color: var(--secondary-color); /* Green from palette */
+            background-color: var(--secondary-color);
             color: var(--white);
             border: none;
             padding: 12px 25px;
@@ -364,7 +380,7 @@ $conn->close(); // Close the database connection
             transition: background-color 0.3s ease;
         }
         .booking-section button:hover {
-            background-color: #17b38c; /* Darker secondary */
+            background-color: #17b38c;
         }
         .login-to-book, .already-booked-msg {
             font-size: 1.1em;
@@ -376,7 +392,7 @@ $conn->close(); // Close the database connection
             font-weight: bold;
         }
 
-        /* Message styling (reused from other pages) */
+        /* Message styling */
         .message {
             margin: 20px auto;
             padding: 12px;
@@ -389,88 +405,91 @@ $conn->close(); // Close the database connection
         .error-msg { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .info-msg { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
 
-        /* Header/Footer styles (consistent with other pages, using variables) */
+        /* Header/Footer styles (consistent with other pages) */
         .main-header {
             background-color: var(--navbar-bg);
             box-shadow: 0 2px 5px var(--shadow-color);
             border-bottom: 1px solid var(--navbar-border);
             padding: 15px 0;
         }
-        .main-nav { display: flex; justify-content: space-between; align-items: center; }
-        .site-logo { font-size: 1.8em; font-weight: bold; color: var(--navbar-logo-color); margin-right: 20px; text-decoration: none; }
-        .site-logo:hover { color: var(--navbar-logo-color); opacity: 0.9; } 
-        .nav-links { list-style: none; display: flex; align-items: center; margin: 0; padding: 0; }
-        .nav-links li { margin-left: 25px; }
-        .nav-links a { color: var(--navbar-link-color); font-weight: 500; padding: 5px 0; transition: color 0.3s ease; text-decoration: none; }
-        .nav-links a:not(.btn-navbar):hover { color: var(--navbar-logo-color); }
+        .main-nav { display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+        .site-logo { font-size: 1.8em; font-weight: bold; color: var(--navbar-logo-color); margin-right: 20px; text-decoration: none; flex-shrink: 0; }
+        .site-logo:hover { color: var(--navbar-logo-color); opacity: 0.9; }
+        .nav-links { list-style: none; display: flex; align-items: center; margin: 0; padding: 0; gap: 25px; }
+        .nav-links li { margin-left: 0; }
+        .nav-links a { color: var(--navbar-link-color); font-weight: 500; padding: 5px 0; text-decoration: none; transition: color 0.2s ease; }
+        .nav-links a:hover:not(.btn-navbar) { color: var(--navbar-logo-color); }
         .welcome-message { color: var(--navbar-link-color); font-weight: 500; margin-right: 15px; white-space: nowrap; }
-        
-        .btn-navbar {
-            display: inline-block;
-            padding: 8px 18px; 
-            border-radius: 8px; 
-            font-weight: bold;
-            font-size: 0.95em; 
-            text-align: center;
-            text-decoration: none;
-            transition: background-color 0.2s ease, opacity 0.2s ease;
-            color: var(--navbar-btn-text-color); 
-            border: none;
-        }
-        .btn-navbar.dashboard { background-color: var(--navbar-dashboard-btn-bg); }
-        .btn-navbar.logout { background-color: var(--navbar-logout-btn-bg); }
+        .btn-navbar { display: inline-block; padding: 8px 18px; border-radius: 8px; font-weight: bold; font-size: 0.95em; text-align: center; text-decoration: none; transition: background-color 0.2s ease, opacity 0.2s ease; color: var(--navbar-btn-text-color); border: none; }
+        .btn-navbar.dashboard { background-color: var(--navbar-dashboard-btn-bg); margin-left: 10px; }
+        .btn-navbar.logout { background-color: var(--navbar-logout-btn-bg); margin-left: 10px; }
         .btn-navbar:hover { opacity: 0.9; }
 
-        .main-footer {
-            background-color: var(--text-color); 
-            color: var(--white);
-            text-align: center;
-            padding: 25px 0;
-            font-size: 0.9em;
-            margin-top: auto; 
-            width: 100%;
+        .main-footer { 
+            background-color: #2f3542; 
+            color: #e0e0e0; 
+            text-align: center; padding: 25px 0; font-size: 0.9em; margin-top: auto; width: 100%; 
         }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 20px;
+        .main-footer .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+        /* Responsive Adjustments */
+        @media (max-width: 768px) {
+            .event-details-container { padding: 30px; max-width: 95%; }
+            .event-details-image { max-height: 250px; }
+            .event-details-container h1 { font-size: 2.2em; }
+            .meta-info { flex-direction: column; gap: 10px; padding: 10px 0; }
+            .meta-item { min-width: unset; width: 100%; }
+            .description-full h2 { font-size: 1.6em; }
+            .booking-section { padding: 20px; }
+            /* Navbar adjustments */
+            .main-nav { flex-direction: column; gap: 10px; align-items: flex-start; padding: 0 15px; }
+            .site-logo { margin-bottom: 5px; }
+            .nav-links { flex-wrap: wrap; justify-content: flex-start; gap: 10px; width: 100%; }
+            .nav-links li { margin-left: 0; }
+            .welcome-message { margin-right: 0; width: 100%; text-align: center; }
+            .btn-navbar.dashboard, .btn-navbar.logout { margin-left: 0; width: auto; flex-grow: 1; }
+        }
+        @media (max-width: 480px) {
+            .event-details-container { padding: 20px; }
+            .event-details-container h1 { font-size: 1.8em; }
+            .event-details-image { max-height: 180px; }
+            .booking-section h3 { font-size: 1.4em; }
+            .booking-section button { padding: 10px 20px; font-size: 1em; }
         }
     </style>
 </head>
 <body>
     <header class="main-header">
-        <div class="container">
-            <nav class="main-nav">
-                <a href="index.php" class="site-logo">Mero Events</a>
-                <ul class="nav-links">
-                    <li><a href="index.php">Home</a></li>
-                    <li><a href="events.php">Events</a></li>
-                    <li><a href="about.php">About</a></li>
-                    <li><a href="contact.php">Contact</a></li>
+        <nav class="main-nav">
+            <a href="index.php" class="site-logo">Mero Events</a>
+            <ul class="nav-links">
+                <li><a href="index.php">Home</a></li>
+                <li><a href="events.php">Events</a></li>
+                <li><a href="about.php">About</a></li>
+                <li><a href="contact.php">Contact</a></li>
+                
+                <?php
+                // Dynamic Login/Dashboard/Logout links for the navbar
+                if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true) {
+                    $dashboard_link = '#'; 
                     
-                    <?php
-                    // Dynamic Login/Dashboard/Logout links for the navbar
-                    if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true) {
-                        $dashboard_link = '#'; 
-                        
-                        if (isset($_SESSION["user_type"])) {
-                            if ($_SESSION["user_type"] == "organizer") {
-                                $dashboard_link = 'organizer-dashboard/dashboard.php';
-                            } elseif ($_SESSION["user_type"] == "user") {
-                                $dashboard_link = 'user-dashboard/dashboard.php';
-                            }
+                    if (isset($_SESSION["user_type"])) {
+                        if ($_SESSION["user_type"] == "organizer") {
+                            $dashboard_link = 'organizer-dashboard/dashboard.php';
+                        } elseif ($_SESSION["user_type"] == "user") {
+                            $dashboard_link = 'user-dashboard/dashboard.php';
                         }
-
-                        echo '<li class="welcome-message">Welcome, ' . htmlspecialchars($_SESSION["user_name"]) . '</li>';
-                        echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn-navbar dashboard">Dashboard</a></li>';
-                        echo '<li><a href="logout.php" class="btn-navbar logout">Logout</a></li>'; 
-                    } else {
-                        echo '<li><a href="auth.php" class="btn-navbar dashboard">Login/Register</a></li>'; 
                     }
-                    ?>
-                </ul>
-            </nav>
-        </div>
+
+                    echo '<li class="welcome-message">Welcome, ' . htmlspecialchars($_SESSION["user_name"]) . '</li>';
+                    echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn-navbar dashboard">Dashboard</a></li>';
+                    echo '<li><a href="logout.php" class="btn-navbar logout">Logout</a></li>'; 
+                } else {
+                    echo '<li><a href="auth.php" class="btn-navbar dashboard">Login/Register</a></li>'; 
+                }
+                ?>
+            </ul>
+        </nav>
     </header>
 
     <main>
@@ -562,7 +581,10 @@ $conn->close(); // Close the database connection
         </div>
     </main>
 
-    <!-- FOOTER SECTION (Included from includes/footer.php) -->
-    <?php require_once 'includes/footer.php'; ?>
+    <footer class="main-footer">
+        <div class="container">
+            <p>© 2023 Mero Events. All rights reserved.</p>
+        </div>
+    </footer>
 </body>
 </html>

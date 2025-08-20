@@ -1,11 +1,14 @@
 <?php
 // user-dashboard/dashboard.php
 
-// 1. Include session protection to ensure only logged-in users can access this dashboard
-require_once '../includes/session-user.php';
+// 1. Ensure user is logged in as a "user" and that includes/config.php is loaded once
+// The includes/session-user.php script should handle session_start() and require_once '../includes/config.php';
+require_once '../includes/session-user.php'; 
 
-// At this point, $_SESSION['user_id'], $_SESSION['user_name'], $_SESSION['user_email'],
-// and $_SESSION['user_type'] are guaranteed to be set and 'user_type' is 'user'.
+// REMOVED THE REDUNDANT require_once '../includes/config.php';
+// REMOVED THE $conn->close(); LINE.
+// The database connection ($conn) is managed by session-user.php and will be
+// automatically closed by PHP at the end of this script's execution.
 ?>
 
 <!DOCTYPE html>
@@ -13,54 +16,81 @@ require_once '../includes/session-user.php';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- 6. Title Tag -->
     <title>User Dashboard - Mero Events</title>
-    <!-- 7. Link to external stylesheet -->
+    <!-- Include Font Awesome for icons if needed -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Link to your main CSS file -->
     <link rel="stylesheet" href="../assets/css/style.css">
     <style>
-        /* 5. Basic styling (clean, centered, dashboard layout) */
+        /* Define Color Palette for consistency with project theme */
+        :root {
+            /* General project colors */
+            --primary-color: #ff6b6b;   /* Reddish-orange */
+            --secondary-color: #1dd1a1; /* Teal green */
+            --accent-color: #feca57;    /* Yellow-orange */
+            --background-color: #f1f2f6;
+            --text-color: #2f3542;      /* Dark text */
+            --light-text-color: #666666; /* Lighter gray for secondary text */
+            --white: #ffffff;
+            --border-color: #ddd;
+            --shadow-color: rgba(0,0,0,0.05);
+            --hover-shadow-color: rgba(0,0,0,0.1);
+
+            /* Navbar specific colors (from recent prompts) */
+            --navbar-bg: #ffffff;
+            --navbar-border: #f0f0f0; 
+            --navbar-logo-color: #6A5ACD; /* Blue-purple from index.php's navbar image */
+            --navbar-link-color: #666666; 
+            --navbar-dashboard-btn-bg: #4a90e2; 
+            --navbar-logout-btn-bg: #e04444; 
+            --navbar-btn-text-color: #ffffff; 
+        }
+
         body {
             font-family: Arial, sans-serif;
-            background-color: #f4f7f6;
+            background-color: var(--background-color);
+            color: var(--text-color);
             margin: 0;
             display: flex;
             flex-direction: column;
-            min-height: 100vh; /* Ensure body takes full viewport height for sticky footer */
+            min-height: 100vh;
         }
 
+        /* --- Page Container --- */
         main {
-            flex-grow: 1; /* Allows main content to fill available space */
+            flex-grow: 1;
             padding: 40px 20px;
             display: flex;
             justify-content: center;
-            align-items: center; /* Vertically center the dashboard content */
+            align-items: center; /* Center content vertically */
         }
 
-        .dashboard-container {
-            background-color: #fff;
+        .user-dashboard-container { /* Renamed from .dashboard-container for clarity */
+            background-color: var(--white);
             padding: 40px;
             border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 10px var(--shadow-color);
             width: 100%;
             max-width: 600px; /* Adjust width as needed */
             text-align: center;
         }
 
-        .dashboard-container h2 {
-            color: #333;
+        .user-dashboard-container h2 {
+            color: var(--text-color);
             margin-bottom: 25px;
-            font-size: 2.2em;
+            font-size: 2.5em; /* Larger heading */
+            font-weight: bold;
         }
 
         .user-info p {
             font-size: 1.1em;
-            color: #555;
+            color: var(--light-text-color);
             margin-bottom: 10px;
             line-height: 1.6;
         }
 
         .user-info strong {
-            color: #007bff;
+            color: var(--text-color);
         }
         
         .user-info span.account-type {
@@ -75,6 +105,7 @@ require_once '../includes/session-user.php';
             margin-bottom: 25px;
         }
 
+        /* Dashboard Action Buttons Container */
         .dashboard-actions {
             margin-top: 30px;
             display: flex;
@@ -83,174 +114,148 @@ require_once '../includes/session-user.php';
             gap: 20px; /* Space between buttons */
         }
 
-        .dashboard-actions .btn {
-            min-width: 150px; /* Ensure buttons have a minimum width */
-            padding: 12px 20px;
-            font-size: 1em;
-            text-decoration: none; /* Remove underline from links */
-            transition: background-color 0.3s ease, transform 0.2s ease;
+        /* Styles for .btn-common.secondary, .btn-common.primary, .btn-common.logout */
+        .btn-common { /* General button style, not specific to navbar */
+            display: inline-block;
+            padding: 12px 25px; /* More padding for larger buttons */
+            border-radius: 8px; /* Slightly more rounded */
+            font-weight: bold;
+            font-size: 1.1em; /* Larger font size */
+            text-align: center;
+            text-decoration: none;
+            transition: background-color 0.2s ease, transform 0.2s ease;
+            cursor: pointer;
+            border: none;
         }
 
-        /* Re-using .btn-primary and .btn-secondary from style.css */
-        .btn-primary {
-            background-color: #007bff;
-            color: #fff;
-            border: 1px solid #007bff;
+        .btn-common.secondary { /* For "Browse Events" */
+            background-color: var(--secondary-color);
+            color: var(--white);
         }
-
-        .btn-primary:hover {
-            background-color: #0056b3;
-            border-color: #0056b3;
+        .btn-common.secondary:hover {
+            background-color: #17b38c; /* Darker secondary */
             transform: translateY(-2px);
         }
 
-        .btn-secondary {
-            background-color: #28a745; /* A pleasant green */
-            color: #fff;
-            border: 1px solid #28a745;
+        .btn-common.primary { /* For "My Bookings" */
+            background-color: var(--primary-color);
+            color: var(--white);
         }
-
-        .btn-secondary:hover {
-            background-color: #218838;
-            border-color: #1e7e34;
+        .btn-common.primary:hover {
+            background-color: #e65a5a; /* Darker primary */
             transform: translateY(-2px);
         }
 
-        /* Logout button specific style */
-        .btn-logout {
-            background-color: #dc3545; /* Red for logout */
-            border-color: #dc3545;
-            color: #fff;
+        .btn-common.logout { /* For "Logout" */
+            background-color: var(--navbar-logout-btn-bg); 
+            color: var(--white);
         }
-        .btn-logout:hover {
-            background-color: #c82333;
-            border-color: #bd2130;
+        .btn-common.logout:hover {
+            background-color: #cc3939; /* Darker red */
+            transform: translateY(-2px);
         }
 
-        /* Header/Footer (assuming these are included and styled site-wide) */
+
+        /* --- Header/Footer (Consistent with site-wide theme) --- */
         .main-header {
-            background-color: #fff;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            background-color: var(--navbar-bg);
+            box-shadow: 0 2px 5px var(--shadow-color);
+            border-bottom: 1px solid var(--navbar-border);
             padding: 15px 0;
         }
-
-        .main-nav {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .main-nav { 
+            display: flex; justify-content: space-between; align-items: center; 
+            max-width: 1200px; margin: 0 auto; padding: 0 20px; 
         }
-
-        .site-logo {
-            font-size: 1.8em;
-            font-weight: bold;
-            color: #333;
-            margin-right: 20px;
-            text-decoration: none;
+        .site-logo { 
+            font-size: 1.8em; font-weight: bold; color: var(--navbar-logo-color); 
+            margin-right: 20px; text-decoration: none; flex-shrink: 0; 
         }
-
-        .site-logo:hover {
-            color: #007bff;
+        .site-logo:hover { color: var(--navbar-logo-color); opacity: 0.9; }
+        .nav-links { 
+            list-style: none; display: flex; align-items: center; margin: 0; padding: 0; gap: 25px; 
         }
-
-        .nav-links {
-            list-style: none;
-            display: flex;
-            align-items: center;
-            margin: 0;
-            padding: 0;
+        .nav-links li { margin-left: 0; }
+        .nav-links a { 
+            color: var(--navbar-link-color); font-weight: 500; padding: 5px 0; text-decoration: none; 
+            transition: color 0.2s ease; 
         }
-
-        .nav-links li {
-            margin-left: 25px;
+        .nav-links a:hover:not(.btn-navbar) { color: var(--navbar-logo-color); }
+        .welcome-message { color: var(--navbar-link-color); font-weight: 500; margin-right: 15px; white-space: nowrap; }
+        .btn-navbar { /* Navbar-specific buttons, smaller */
+            display: inline-block; padding: 8px 18px; border-radius: 8px; font-weight: bold; 
+            font-size: 0.95em; text-align: center; text-decoration: none; 
+            transition: background-color 0.2s ease, opacity 0.2s ease; 
+            color: var(--navbar-btn-text-color); border: none; 
         }
+        .btn-navbar.dashboard { background-color: var(--navbar-dashboard-btn-bg); margin-left: 10px; }
+        .btn-navbar.logout { background-color: var(--navbar-logout-btn-bg); margin-left: 10px; }
+        .btn-navbar:hover { opacity: 0.9; }
 
-        .nav-links a {
-            color: #555;
-            font-weight: 500;
-            padding: 5px 0;
-            transition: color 0.3s ease;
-            text-decoration: none;
+        .main-footer { 
+            background-color: #2f3542; 
+            color: #e0e0e0; 
+            text-align: center; padding: 25px 0; font-size: 0.9em; margin-top: auto; width: 100%; 
         }
+        .main-footer .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
 
-        .nav-links a:not(.btn):hover {
-            color: #007bff;
+        /* Responsive Adjustments */
+        @media (max-width: 768px) {
+            .user-dashboard-container { padding: 30px; max-width: 95%; }
+            .user-dashboard-container h2 { font-size: 2em; }
+            .dashboard-actions { flex-direction: column; gap: 15px; }
+            .btn-common { width: 100%; max-width: 300px; } /* Full width buttons on small screens */
+            /* Navbar adjustments */
+            .main-nav { flex-direction: column; gap: 10px; align-items: flex-start; padding: 0 15px; }
+            .site-logo { margin-bottom: 5px; }
+            .nav-links { flex-wrap: wrap; justify-content: flex-start; gap: 10px; width: 100%; }
+            .nav-links li { margin-left: 0; }
+            .welcome-message { margin-right: 0; width: 100%; text-align: center; }
+            .btn-navbar.dashboard, .btn-navbar.logout { margin-left: 0; width: auto; flex-grow: 1; }
         }
-
-        .welcome-message {
-            color: #555;
-            font-weight: 500;
-            margin-right: 15px;
-            white-space: nowrap;
-        }
-
-        .main-footer {
-            background-color: #333;
-            color: #fff;
-            text-align: center;
-            padding: 25px 0;
-            font-size: 0.9em;
-            margin-top: auto; /* Push footer to the bottom */
-            width: 100%;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 20px;
+        @media (max-width: 480px) {
+            .user-dashboard-container { padding: 20px; }
+            .user-dashboard-container h2 { font-size: 1.8em; }
         }
     </style>
 </head>
 <body>
     <header class="main-header">
-        <div class="container">
-            <nav class="main-nav">
-                <a href="../index.php" class="site-logo">Mero Events</a>
-                <ul class="nav-links">
-                    <li><a href="../index.php">Home</a></li>
-                    <li><a href="../events.php">Events</a></li>
-                    <li><a href="../about.php">About</a></li>
-                    <li><a href="../contact.php">Contact</a></li>
-                    
-                    <?php
-                    // Dynamic Login/Dashboard/Logout links (reused from index.php logic)
-                    // Note: Since this page is protected, we are always logged in here.
-                    // The '..' is crucial for paths from this subdirectory.
-                    $dashboard_link = ($_SESSION["user_type"] == "organizer") ? 'dashboard.php' : 'dashboard.php'; // Correct path for same-level dashboard
-                    // The dashboard link from the header should be specific to the type in this dashboard
-                    // For user-dashboard, if they are user, dashboard is current page. If somehow organizer, redirect to their dashboard.
-                    if ($_SESSION["user_type"] == "organizer") {
-                        $dashboard_link = '../organizer-dashboard/dashboard.php';
-                    } elseif ($_SESSION["user_type"] == "user") {
-                        $dashboard_link = 'dashboard.php'; // Current page
-                    } else {
-                        $dashboard_link = '../auth.php?action=login&error=session_error'; // Fallback
-                    }
-
-                    echo '<li class="welcome-message">Welcome, ' . htmlspecialchars($_SESSION["user_name"]) . '</li>';
-                    echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn btn-primary">Dashboard</a></li>';
-                    echo '<li><a href="../logout.php" class="btn btn-primary" style="background-color: #dc3545;">Logout</a></li>'; 
-                    ?>
-                </ul>
-            </nav>
-        </div>
+        <nav class="main-nav">
+            <a href="../index.php" class="site-logo">Mero Events</a>
+            <ul class="nav-links">
+                <li><a href="../index.php">Home</a></li>
+                <li><a href="../events.php">Events</a></li>
+                <li><a href="../about.php">About</a></li>
+                <li><a href="../contact.php">Contact</a></li>
+                
+                <?php
+                // Dynamic Dashboard/Logout links for the navbar
+                // Since this page is protected, user is always logged in here as a "user" type.
+                $dashboard_link = 'dashboard.php'; // Link to current dashboard
+                
+                echo '<li class="welcome-message">Welcome, ' . htmlspecialchars($_SESSION["user_name"]) . '</li>';
+                echo '<li><a href="' . htmlspecialchars($dashboard_link) . '" class="btn-navbar dashboard">Dashboard</a></li>';
+                echo '<li><a href="../logout.php" class="btn-navbar logout">Logout</a></li>'; 
+                ?>
+            </ul>
+        </nav>
     </header>
 
     <main>
-        <div class="dashboard-container">
-            <!-- 2. Display Welcome Message -->
+        <div class="user-dashboard-container">
             <h2>Welcome, <?php echo htmlspecialchars($_SESSION['user_name']); ?>!</h2>
             
             <div class="user-info">
-                <!-- 2. Display User's full name and email -->
-                <p>Full Name: <strong><?php echo htmlspecialchars($_SESSION['user_name']); ?></strong></p>
+                <p>Account Type: <span class="account-type">User</span></p>
                 <p>Email: <strong><?php echo htmlspecialchars($_SESSION['user_email']); ?></strong></p>
-                <!-- 2. Display Account Type -->
-                <p>Account Type: <span class="account-type"><?php echo htmlspecialchars(ucfirst($_SESSION['user_type'])); ?></span></p>
             </div>
 
+            <!-- Dashboard Action Buttons -->
             <div class="dashboard-actions">
-                <!-- 3. Buttons/links -->
-                <a href="../events.php" class="btn btn-secondary">Browse Events</a>
-                <a href="../logout.php" class="btn btn-primary btn-logout">Logout</a>
+                <a href="../events.php" class="btn-common secondary">Browse Events</a>
+                <a href="my-bookings.php" class="btn-common primary">My Bookings</a> 
+                <a href="../logout.php" class="btn-common logout">Logout</a>
             </div>
         </div>
     </main>

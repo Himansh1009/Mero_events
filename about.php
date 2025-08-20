@@ -425,7 +425,7 @@ session_start(); // Start session to check login status for navbar
             <a href="index.php" class="site-logo">Mero Events</a>
             <ul class="nav-links">
                 <li><a href="index.php">Home</a></li>
-                <li><a href="events.php">Browse Events</a></li>
+                <li><a href="events.php">Events</a></li>
                 <li><a href="about.php">About</a></li>
                 <li><a href="contact.php">Contact</a></li>
                 
